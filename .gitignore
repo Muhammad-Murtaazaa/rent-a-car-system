@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# Node
+node_modules/
+frontend/node_modules/
+
+# Runtime data & backups
+app_data/backups/
+app_data/documents/*
+!app_data/documents/.gitkeep
+
+# Logs & temp
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
