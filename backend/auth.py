@@ -91,8 +91,16 @@ def get_tenant_context(
         parts = host_clean.split(".")
         if len(parts) >= 2:
             subdomain = parts[0]
-            if subdomain not in ("www", "localhost", "127", "127.0.0.1"):
-                return {"tenant_id": subdomain, "role": resolved_role}
+            if subdomain not in ("www", "localhost", "127", "127.0.0.1", "racms", "demo", "app", "rental"):
+                try:
+                    from backend.database import SessionLocal
+                    from backend import models
+                    with SessionLocal() as db:
+                        t = db.query(models.Tenant).filter(models.Tenant.id == subdomain).first()
+                        if t:
+                            return {"tenant_id": subdomain, "role": resolved_role}
+                except Exception:
+                    pass
 
     # 3. Fallback to X-Tenant-ID header
     if x_tenant_id:
