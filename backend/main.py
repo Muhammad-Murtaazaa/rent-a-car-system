@@ -73,6 +73,9 @@ def ensure_sqlite_columns():
             ("trial_ends_at", "DATE"),
             ("created_at", "DATETIME"),
         ],
+        "quotations": [
+            ("items", "JSON"),
+        ],
     }
     with engine.begin() as conn:
         for table, columns in needed.items():
@@ -1012,6 +1015,36 @@ def get_tenant_branding(
         "branding_settings": db_tenant.branding_settings or {}
     }
 
+@app.put("/api/tenant/branding")
+def update_own_tenant_branding(
+    payload: schemas.TenantSelfBrandingUpdate,
+    db: Session = Depends(get_db),
+    tenant_context: dict = Depends(get_tenant_context)
+):
+    tenant_id = tenant_context["tenant_id"]
+    db_tenant = crud.get_tenant(db, tenant_id)
+    if not db_tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    if payload.name is not None:
+        db_tenant.name = payload.name
+    if payload.logo_url is not None:
+        db_tenant.logo_url = payload.logo_url
+    if payload.primary_theme_color is not None:
+        db_tenant.primary_theme_color = payload.primary_theme_color
+    if payload.branding_settings is not None:
+        merged = dict(db_tenant.branding_settings or {})
+        merged.update(payload.branding_settings)
+        db_tenant.branding_settings = merged
+    db.commit()
+    db.refresh(db_tenant)
+    return {
+        "id": db_tenant.id,
+        "name": db_tenant.name,
+        "logo_url": db_tenant.logo_url,
+        "primary_theme_color": db_tenant.primary_theme_color,
+        "branding_settings": db_tenant.branding_settings or {}
+    }
+
 
 # --- Investors & Tracing Endpoints ---
 @app.get("/api/investors", response_model=List[schemas.InvestorFinancialSummary])
@@ -1286,6 +1319,47 @@ def delete_receipt(receipt_id: int, db: Session = Depends(get_db), tenant_contex
     if not deleted:
         raise HTTPException(status_code=404, detail="Receipt not found")
     return {"message": "Receipt deleted successfully"}
+
+
+# --- Vehicles Invoices (Multi-Vehicle Client Billing & Owner Settlement) ---
+@app.get("/api/vehicle-invoices", response_model=List[schemas.VehicleInvoice])
+def list_vehicle_invoices(skip: int = 0, limit: int = 1000, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    return crud.get_vehicle_invoices(db, tenant_id=tenant_context["tenant_id"], skip=skip, limit=limit)
+
+@app.post("/api/vehicle-invoices", response_model=schemas.VehicleInvoice)
+def create_vehicle_invoice(invoice: schemas.VehicleInvoiceCreate, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    return crud.create_vehicle_invoice(db, invoice=invoice, tenant_id=tenant_context["tenant_id"])
+
+@app.put("/api/vehicle-invoices/{invoice_id}", response_model=schemas.VehicleInvoice)
+def update_vehicle_invoice(invoice_id: int, invoice_update: schemas.VehicleInvoiceUpdate, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    updated = crud.update_vehicle_invoice(db, invoice_id=invoice_id, invoice_update=invoice_update, tenant_id=tenant_context["tenant_id"])
+    if not updated:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    return updated
+
+@app.delete("/api/vehicle-invoices/{invoice_id}")
+def delete_vehicle_invoice(invoice_id: int, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    deleted = crud.delete_vehicle_invoice(db, invoice_id=invoice_id, tenant_id=tenant_context["tenant_id"])
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    return {"message": "Invoice deleted successfully"}
+
+
+# --- Official Letterhead Documents ---
+@app.get("/api/letters", response_model=List[schemas.OfficialLetter])
+def list_official_letters(skip: int = 0, limit: int = 1000, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    return crud.get_official_letters(db, tenant_id=tenant_context["tenant_id"], skip=skip, limit=limit)
+
+@app.post("/api/letters", response_model=schemas.OfficialLetter)
+def create_official_letter(letter: schemas.OfficialLetterCreate, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    return crud.create_official_letter(db, letter=letter, tenant_id=tenant_context["tenant_id"])
+
+@app.delete("/api/letters/{letter_id}")
+def delete_official_letter(letter_id: int, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    deleted = crud.delete_official_letter(db, letter_id=letter_id, tenant_id=tenant_context["tenant_id"])
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Letter not found")
+    return {"message": "Letter deleted successfully"}
 
 
 # --- Serve React Frontend SPA build ---

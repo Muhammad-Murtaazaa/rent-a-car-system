@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { 
   Car, Users, Calendar, ShieldAlert, Wrench, Wallet, Plus, 
-  Search, Trash2, Edit2, AlertTriangle, CheckCircle, FileText, Send, X, Clock, PenTool, TrendingUp, DollarSign, Sun, Moon, Briefcase, Menu, Eye, BarChart3, Download, Printer, PieChart, LineChart, UserPlus, Receipt, BadgeCheck, ClipboardList
+  Search, Trash2, Edit2, AlertTriangle, CheckCircle, FileText, Send, X, Clock, PenTool, TrendingUp, DollarSign, Sun, Moon, Briefcase, Menu, Eye, BarChart3, Download, Printer, PieChart, LineChart, UserPlus, Receipt, BadgeCheck, ClipboardList, ScrollText
 } from "lucide-react";
 import CarHistoryModal from "./CarHistoryModal";
 import SuperAdminDashboard from "./SuperAdminDashboard";
@@ -9,6 +9,7 @@ import EmployeesView from "./EmployeesView";
 import LeadsView from "./LeadsView";
 import QuotationsView from "./QuotationsView";
 import ReceiptsView from "./ReceiptsView";
+import InvoicesLettersView from "./InvoicesLettersView";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter, Button, Badge, Input, GlowButton, GradientCard, ShimmerButton, AnimatedGradientText, MagicCard, BorderBeam, Progress, Separator } from "./shadcn";
 import { jsPDF } from "jspdf";
 import {
@@ -69,6 +70,8 @@ export default function App() {
   const [leads, setLeads] = useState([]);
   const [quotations, setQuotations] = useState([]);
   const [receipts, setReceipts] = useState([]);
+  const [vehicleInvoices, setVehicleInvoices] = useState([]);
+  const [officialLetters, setOfficialLetters] = useState([]);
   const [prefillQuote, setPrefillQuote] = useState(null);
   const [prefillCustomer, setPrefillCustomer] = useState(null);
 
@@ -155,7 +158,7 @@ export default function App() {
       const q = "limit=10000";
       const [
         carsRes, custRes, bookingsRes, maintRes, blRes,
-        alertsRes, finRes, invRes, shRes, empRes, leadsRes, quotesRes, rcptRes
+        alertsRes, finRes, invRes, shRes, empRes, leadsRes, quotesRes, rcptRes, vInvRes, ltrRes
       ] = await Promise.all([
         fetch(`/api/cars?${q}`),
         fetch(`/api/customers?${q}`),
@@ -170,6 +173,8 @@ export default function App() {
         fetch(`/api/leads?limit=1000`),
         fetch(`/api/quotations?limit=1000`),
         fetch(`/api/receipts?limit=1000`),
+        fetch(`/api/vehicle-invoices?limit=1000`),
+        fetch(`/api/letters?limit=1000`),
       ]);
 
       if (carsRes.ok) setCars(await carsRes.json());
@@ -185,6 +190,8 @@ export default function App() {
       if (leadsRes.ok) setLeads(await leadsRes.json());
       if (quotesRes.ok) setQuotations(await quotesRes.json());
       if (rcptRes.ok) setReceipts(await rcptRes.json());
+      if (vInvRes.ok) setVehicleInvoices(await vInvRes.json());
+      if (ltrRes.ok) setOfficialLetters(await ltrRes.json());
     } catch (err) {
       console.error("Error loading API data:", err);
     }
@@ -498,6 +505,7 @@ export default function App() {
               { id: "leads", label: "Leads CRM", icon: UserPlus },
               { id: "quotations", label: "Quotations", icon: ClipboardList },
               { id: "bookings", label: "Bookings", icon: Calendar },
+              { id: "invoices-letters", label: "Invoices & Letters", icon: ScrollText },
               { id: "receipts", label: "Receipts", icon: Receipt },
               { id: "employees", label: "Employees", icon: BadgeCheck },
               { id: "maintenance", label: "Maintenance", icon: Wrench },
@@ -680,6 +688,16 @@ export default function App() {
               setActiveTab("bookings");
               setShowBookingModal(true);
             }}
+          />
+        )}
+        {activeTab === "invoices-letters" && (
+          <InvoicesLettersView
+            vehicleInvoices={vehicleInvoices}
+            officialLetters={officialLetters}
+            cars={cars}
+            branding={branding}
+            setBranding={setBranding}
+            fetchData={fetchData}
           />
         )}
         {activeTab === "receipts" && (

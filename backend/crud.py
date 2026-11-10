@@ -963,3 +963,79 @@ def delete_receipt(db: Session, receipt_id: int, tenant_id: str):
         db.commit()
     return db_r
 
+
+# --- Vehicles Invoices CRUD ---
+def get_vehicle_invoices(db: Session, tenant_id: str, skip: int = 0, limit: int = 1000):
+    return (
+        db.query(models.VehicleInvoice)
+        .filter(models.VehicleInvoice.tenant_id == tenant_id)
+        .order_by(models.VehicleInvoice.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+def get_vehicle_invoice(db: Session, invoice_id: int, tenant_id: str):
+    return db.query(models.VehicleInvoice).filter(models.VehicleInvoice.id == invoice_id, models.VehicleInvoice.tenant_id == tenant_id).first()
+
+def create_vehicle_invoice(db: Session, invoice: schemas.VehicleInvoiceCreate, tenant_id: str):
+    data = invoice.dict()
+    if not data.get("invoice_number"):
+        count = db.query(models.VehicleInvoice).filter(models.VehicleInvoice.tenant_id == tenant_id).count()
+        data["invoice_number"] = f"INV-{1001 + count}"
+    db_inv = models.VehicleInvoice(**data, tenant_id=tenant_id)
+    db.add(db_inv)
+    db.commit()
+    db.refresh(db_inv)
+    return db_inv
+
+def update_vehicle_invoice(db: Session, invoice_id: int, invoice_update: schemas.VehicleInvoiceUpdate, tenant_id: str):
+    db_inv = get_vehicle_invoice(db, invoice_id, tenant_id)
+    if not db_inv:
+        return None
+    for key, value in invoice_update.dict(exclude_unset=True).items():
+        setattr(db_inv, key, value)
+    db.commit()
+    db.refresh(db_inv)
+    return db_inv
+
+def delete_vehicle_invoice(db: Session, invoice_id: int, tenant_id: str):
+    db_inv = get_vehicle_invoice(db, invoice_id, tenant_id)
+    if db_inv:
+        db.delete(db_inv)
+        db.commit()
+    return db_inv
+
+
+# --- Official Letters CRUD ---
+def get_official_letters(db: Session, tenant_id: str, skip: int = 0, limit: int = 1000):
+    return (
+        db.query(models.OfficialLetter)
+        .filter(models.OfficialLetter.tenant_id == tenant_id)
+        .order_by(models.OfficialLetter.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+def get_official_letter(db: Session, letter_id: int, tenant_id: str):
+    return db.query(models.OfficialLetter).filter(models.OfficialLetter.id == letter_id, models.OfficialLetter.tenant_id == tenant_id).first()
+
+def create_official_letter(db: Session, letter: schemas.OfficialLetterCreate, tenant_id: str):
+    data = letter.dict()
+    if not data.get("letter_number"):
+        count = db.query(models.OfficialLetter).filter(models.OfficialLetter.tenant_id == tenant_id).count()
+        data["letter_number"] = f"LTR-{1001 + count}"
+    db_ltr = models.OfficialLetter(**data, tenant_id=tenant_id)
+    db.add(db_ltr)
+    db.commit()
+    db.refresh(db_ltr)
+    return db_ltr
+
+def delete_official_letter(db: Session, letter_id: int, tenant_id: str):
+    db_ltr = get_official_letter(db, letter_id, tenant_id)
+    if db_ltr:
+        db.delete(db_ltr)
+        db.commit()
+    return db_ltr
+

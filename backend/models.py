@@ -295,7 +295,45 @@ class Quotation(Base):
     total_amount = Column(Float, nullable=False, default=0.0)
     valid_until = Column(Date, nullable=True)
     status = Column(String, nullable=False, default="Draft")  # Draft, Sent, Accepted, Expired, Converted
+    items = Column(JSON, nullable=True, default=list)  # Multi-vehicle rate lines: [{name, days_label, amount}]
     notes = Column(String, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+class VehicleInvoice(Base):
+    __tablename__ = "vehicle_invoices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(String, nullable=False, index=True, default="default")
+    invoice_number = Column(String, nullable=False, index=True)
+    invoice_mode = Column(String, nullable=False, default="client")  # "client" | "settlement"
+    invoice_to = Column(String, nullable=False)
+    customer_phone = Column(String, nullable=True)
+    period_label = Column(String, nullable=True)  # e.g. "Month Of October"
+    invoice_date = Column(Date, nullable=False)
+    vehicle_items = Column(JSON, nullable=False, default=list)  # [{name, period, amount}]
+    expense_items = Column(JSON, nullable=False, default=list)  # [{description, amount}]
+    total_rent = Column(Float, nullable=False, default=0.0)
+    total_expense = Column(Float, nullable=False, default=0.0)
+    received_amount = Column(Float, nullable=False, default=0.0)
+    payable_or_balance = Column(Float, nullable=False, default=0.0)
+    show_bank_details = Column(Boolean, nullable=False, default=True)
+    bank_name = Column(String, nullable=True)
+    account_title = Column(String, nullable=True)
+    account_number = Column(String, nullable=True)
+    terms_text = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="Unpaid")  # Unpaid, Partial, Paid, Settled
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+class OfficialLetter(Base):
+    __tablename__ = "official_letters"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(String, nullable=False, index=True, default="default")
+    letter_number = Column(String, nullable=False, index=True)
+    letter_date = Column(Date, nullable=False)
+    recipient = Column(String, nullable=True)
+    subject = Column(String, nullable=True)
+    body = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 class Receipt(Base):

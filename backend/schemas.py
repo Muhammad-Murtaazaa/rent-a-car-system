@@ -579,6 +579,7 @@ class QuotationBase(BaseModel):
     total_amount: float = 0.0
     valid_until: Optional[date] = None
     status: str = "Draft"
+    items: Optional[List[Dict]] = []
     notes: Optional[str] = None
 
 class QuotationCreate(QuotationBase):
@@ -602,6 +603,7 @@ class QuotationUpdate(BaseModel):
     total_amount: Optional[float] = None
     valid_until: Optional[date] = None
     status: Optional[str] = None
+    items: Optional[List[Dict]] = None
     notes: Optional[str] = None
 
 class Quotation(QuotationBase):
@@ -636,3 +638,83 @@ class Receipt(ReceiptBase):
 
     class Config:
         from_attributes = True
+
+
+# Vehicles Invoices (Multi-Vehicle Client Billing & Owner/Investor Settlement)
+class VehicleInvoiceBase(BaseModel):
+    invoice_number: Optional[str] = None
+    invoice_mode: str = "client"  # "client" | "settlement"
+    invoice_to: str
+    customer_phone: Optional[str] = None
+    period_label: Optional[str] = None
+    invoice_date: date
+    vehicle_items: List[Dict] = []  # [{name, period, amount}]
+    expense_items: List[Dict] = []  # [{description, amount}]
+    total_rent: float = 0.0
+    total_expense: float = 0.0
+    received_amount: float = 0.0
+    payable_or_balance: float = 0.0
+    show_bank_details: bool = True
+    bank_name: Optional[str] = None
+    account_title: Optional[str] = None
+    account_number: Optional[str] = None
+    terms_text: Optional[str] = None
+    status: str = "Unpaid"
+
+class VehicleInvoiceCreate(VehicleInvoiceBase):
+    pass
+
+class VehicleInvoiceUpdate(BaseModel):
+    invoice_mode: Optional[str] = None
+    invoice_to: Optional[str] = None
+    customer_phone: Optional[str] = None
+    period_label: Optional[str] = None
+    invoice_date: Optional[date] = None
+    vehicle_items: Optional[List[Dict]] = None
+    expense_items: Optional[List[Dict]] = None
+    total_rent: Optional[float] = None
+    total_expense: Optional[float] = None
+    received_amount: Optional[float] = None
+    payable_or_balance: Optional[float] = None
+    show_bank_details: Optional[bool] = None
+    bank_name: Optional[str] = None
+    account_title: Optional[str] = None
+    account_number: Optional[str] = None
+    terms_text: Optional[str] = None
+    status: Optional[str] = None
+
+class VehicleInvoice(VehicleInvoiceBase):
+    id: int
+    tenant_id: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# Official Letterhead Documents
+class OfficialLetterBase(BaseModel):
+    letter_number: Optional[str] = None
+    letter_date: date
+    recipient: Optional[str] = None
+    subject: Optional[str] = None
+    body: Optional[str] = None
+
+class OfficialLetterCreate(OfficialLetterBase):
+    pass
+
+class OfficialLetter(OfficialLetterBase):
+    id: int
+    tenant_id: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# Tenant Self-Service White-Label Profile Update
+class TenantSelfBrandingUpdate(BaseModel):
+    name: Optional[str] = None
+    logo_url: Optional[str] = None
+    primary_theme_color: Optional[str] = None
+    branding_settings: Optional[Dict[str, str]] = None
