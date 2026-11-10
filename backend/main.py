@@ -4,10 +4,11 @@ import time
 import uuid
 import threading
 import urllib.request
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import List, Optional
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, status, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session, joinedload
@@ -32,6 +33,7 @@ def ensure_sqlite_columns():
         return
     needed = {
         "cars": [
+            ("chassis_number", "VARCHAR"),
             ("registration_doc_url", "VARCHAR"),
             ("fitness_cert_url", "VARCHAR"),
             ("token_tax_doc_url", "VARCHAR"),
@@ -45,10 +47,31 @@ def ensure_sqlite_columns():
         ],
         "customers": [
             ("license_expiry_date", "DATE"),
+            ("cheque_number", "VARCHAR"),
+            ("passport_number", "VARCHAR"),
+            ("guarantor_name", "VARCHAR"),
+            ("guarantor_phone", "VARCHAR"),
+            ("guarantor_cnic", "VARCHAR"),
+            ("guarantor_address", "VARCHAR"),
+            ("guarantee_details", "VARCHAR"),
         ],
         "bookings": [
             ("booking_type", "VARCHAR"),
             ("company_name", "VARCHAR"),
+        ],
+        "investors": [
+            ("payout_type", "VARCHAR DEFAULT 'percentage'"),
+            ("fixed_amount", "FLOAT DEFAULT 0.0"),
+        ],
+        "shareholders": [
+            ("payout_type", "VARCHAR DEFAULT 'percentage'"),
+            ("fixed_amount", "FLOAT DEFAULT 0.0"),
+        ],
+        "tenants": [
+            ("plan_type", "VARCHAR DEFAULT 'standard'"),
+            ("subscription_status", "VARCHAR DEFAULT 'active'"),
+            ("trial_ends_at", "DATE"),
+            ("created_at", "DATETIME"),
         ],
     }
     with engine.begin() as conn:
@@ -94,6 +117,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Compress JSON/HTML/JS responses for ultra-fast delivery over internet
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # S3 Configuration
 S3_BUCKET = os.environ.get("AWS_STORAGE_BUCKET_NAME")
@@ -616,6 +642,13 @@ def create_customer(
     cnic_number: str = Form(...),
     license_number: str = Form(...),
     license_expiry_date: Optional[str] = Form(None),
+    cheque_number: Optional[str] = Form(None),
+    passport_number: Optional[str] = Form(None),
+    guarantor_name: Optional[str] = Form(None),
+    guarantor_phone: Optional[str] = Form(None),
+    guarantor_cnic: Optional[str] = Form(None),
+    guarantor_address: Optional[str] = Form(None),
+    guarantee_details: Optional[str] = Form(None),
     cnic_front: Optional[UploadFile] = File(None),
     cnic_back: Optional[UploadFile] = File(None),
     license_front: Optional[UploadFile] = File(None),
@@ -643,14 +676,21 @@ def create_customer(
     customer_schema = schemas.CustomerCreate(
         full_name=full_name,
         phone_primary=phone_primary,
-        phone_secondary=phone_secondary,
+        phone_secondary=phone_secondary or None,
         home_address=home_address,
         cnic_number=cnic_number,
         license_number=license_number,
         cnic_front_path=cnic_front_path,
         cnic_back_path=cnic_back_path,
         license_front_path=license_front_path,
-        license_expiry_date=parsed_license_expiry
+        license_expiry_date=parsed_license_expiry,
+        cheque_number=cheque_number or None,
+        passport_number=passport_number or None,
+        guarantor_name=guarantor_name or None,
+        guarantor_phone=guarantor_phone or None,
+        guarantor_cnic=guarantor_cnic or None,
+        guarantor_address=guarantor_address or None,
+        guarantee_details=guarantee_details or None,
     )
     return crud.create_customer(db=db, customer=customer_schema, tenant_id=tenant_id)
 
@@ -664,6 +704,13 @@ def update_customer(
     cnic_number: str = Form(...),
     license_number: str = Form(...),
     license_expiry_date: Optional[str] = Form(None),
+    cheque_number: Optional[str] = Form(None),
+    passport_number: Optional[str] = Form(None),
+    guarantor_name: Optional[str] = Form(None),
+    guarantor_phone: Optional[str] = Form(None),
+    guarantor_cnic: Optional[str] = Form(None),
+    guarantor_address: Optional[str] = Form(None),
+    guarantee_details: Optional[str] = Form(None),
     cnic_front: Optional[UploadFile] = File(None),
     cnic_back: Optional[UploadFile] = File(None),
     license_front: Optional[UploadFile] = File(None),
@@ -687,6 +734,13 @@ def update_customer(
         "home_address": home_address,
         "cnic_number": cnic_number,
         "license_number": license_number,
+        "cheque_number": cheque_number or None,
+        "passport_number": passport_number or None,
+        "guarantor_name": guarantor_name or None,
+        "guarantor_phone": guarantor_phone or None,
+        "guarantor_cnic": guarantor_cnic or None,
+        "guarantor_address": guarantor_address or None,
+        "guarantee_details": guarantee_details or None,
     }
     if license_expiry_date:
         try:
@@ -850,6 +904,62 @@ def toggle_tenant_features(
         raise HTTPException(status_code=404, detail="Tenant not found")
     return crud.update_tenant(db, tenant_id, payload)
 
+@app.delete("/api/saas-admin/tenants/{tenant_id}")
+def remove_tenant(
+    tenant_id: str,
+    db: Session = Depends(get_db),
+    admin_context: dict = Depends(require_super_admin)
+):
+    if tenant_id == "default":
+        raise HTTPException(status_code=400, detail="Cannot delete default tenant")
+    db_tenant = crud.get_tenant(db, tenant_id)
+    if not db_tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    db.delete(db_tenant)
+    db.commit()
+    return {"message": f"Tenant '{tenant_id}' deleted successfully"}
+
+@app.post("/api/saas-admin/tenants/{tenant_id}/extend-trial", response_model=schemas.Tenant)
+def extend_tenant_trial(
+    tenant_id: str,
+    days: int = 7,
+    db: Session = Depends(get_db),
+    admin_context: dict = Depends(require_super_admin)
+):
+    db_tenant = crud.get_tenant(db, tenant_id)
+    if not db_tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    base_date = db_tenant.trial_ends_at if (db_tenant.trial_ends_at and db_tenant.trial_ends_at >= date.today()) else date.today()
+    db_tenant.plan_type = f"trial_{days}d"
+    db_tenant.subscription_status = "trialing"
+    db_tenant.trial_ends_at = base_date + timedelta(days=days)
+    db_tenant.is_active = True
+    db.commit()
+    db.refresh(db_tenant)
+    return db_tenant
+
+@app.get("/api/saas-admin/stats")
+def get_saas_stats(
+    db: Session = Depends(get_db),
+    admin_context: dict = Depends(require_super_admin)
+):
+    tenants = crud.get_tenants(db)
+    total_cars = db.query(models.Car).count()
+    total_bookings = db.query(models.Booking).count()
+    total_customers = db.query(models.Customer).count()
+    trial_count = sum(1 for t in tenants if t.subscription_status == "trialing")
+    active_count = sum(1 for t in tenants if t.is_active)
+    db_engine = "SQLite (WAL Mode)" if str(engine.url).startswith("sqlite") else "PostgreSQL"
+    return {
+        "total_tenants": len(tenants),
+        "active_tenants": active_count,
+        "trial_tenants": trial_count,
+        "total_cars": total_cars,
+        "total_bookings": total_bookings,
+        "total_customers": total_customers,
+        "db_engine": db_engine
+    }
+
 @app.get("/api/tenant/branding")
 def get_tenant_branding(
     db: Session = Depends(get_db), 
@@ -857,25 +967,48 @@ def get_tenant_branding(
 ):
     tenant_id = tenant_context["tenant_id"]
     db_tenant = crud.get_tenant(db, tenant_id)
+    all_default_flags = [
+        "dashboard", "fleet", "customers", "leads", "quotations", "bookings",
+        "receipts", "employees", "maintenance", "blacklist", "whatsapp_api",
+        "advanced_analytics", "chauffeur_module"
+    ]
     if not db_tenant:
-        # Fallback parameters
         return {
+            "id": "default",
             "name": "Rent A Car Management System",
             "logo_url": None,
             "primary_theme_color": "#0d9488",
-            "feature_flags": ["dashboard", "fleet", "customers", "bookings", "maintenance", "blacklist", "whatsapp_api", "advanced_analytics", "chauffeur_module"],
+            "is_active": True,
+            "plan_type": "standard",
+            "subscription_status": "active",
+            "trial_ends_at": None,
+            "trial_days_left": None,
+            "feature_flags": all_default_flags,
             "branding_settings": {
                 "support_email": "support@rentacarmanagement.com",
                 "support_phone": "0300-1234567",
-                "footer_status_text": "Offline Backup System",
+                "footer_status_text": "Cloud SaaS Ready",
                 "bg_gradient_start": "#0d9488"
             }
         }
+    sub_status = getattr(db_tenant, "subscription_status", "active") or "active"
+    trial_ends = getattr(db_tenant, "trial_ends_at", None)
+    days_left = None
+    if trial_ends:
+        days_left = (trial_ends - date.today()).days
+        if sub_status == "trialing" and days_left < 0:
+            sub_status = "expired"
     return {
+        "id": db_tenant.id,
         "name": db_tenant.name,
         "logo_url": db_tenant.logo_url,
         "primary_theme_color": db_tenant.primary_theme_color,
-        "feature_flags": db_tenant.feature_flags,
+        "is_active": db_tenant.is_active,
+        "plan_type": getattr(db_tenant, "plan_type", "standard") or "standard",
+        "subscription_status": sub_status,
+        "trial_ends_at": trial_ends.isoformat() if trial_ends else None,
+        "trial_days_left": days_left,
+        "feature_flags": db_tenant.feature_flags or all_default_flags,
         "branding_settings": db_tenant.branding_settings or {}
     }
 
@@ -1056,6 +1189,103 @@ def create_shareholder_payout(
 
     payout_create = schemas.ShareholderPayoutCreate(**payout.dict(), shareholder_id=shareholder_id)
     return crud.create_shareholder_payout(db, payout=payout_create, tenant_id=tenant_id)
+
+
+# --- Employees & Payroll Endpoints ---
+@app.get("/api/employees", response_model=List[schemas.Employee])
+def list_employees(skip: int = 0, limit: int = 1000, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    return crud.get_employees(db, tenant_id=tenant_context["tenant_id"], skip=skip, limit=limit)
+
+@app.post("/api/employees", response_model=schemas.Employee)
+def create_employee(employee: schemas.EmployeeCreate, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    return crud.create_employee(db, employee=employee, tenant_id=tenant_context["tenant_id"])
+
+@app.put("/api/employees/{employee_id}", response_model=schemas.Employee)
+def update_employee(employee_id: int, employee_update: schemas.EmployeeUpdate, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    updated = crud.update_employee(db, employee_id=employee_id, employee_update=employee_update, tenant_id=tenant_context["tenant_id"])
+    if not updated:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    return updated
+
+@app.delete("/api/employees/{employee_id}")
+def delete_employee(employee_id: int, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    deleted = crud.delete_employee(db, employee_id=employee_id, tenant_id=tenant_context["tenant_id"])
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    return {"message": "Employee deleted successfully"}
+
+@app.post("/api/employees/{employee_id}/payments", response_model=schemas.EmployeePayment)
+def create_employee_payment(employee_id: int, payment: schemas.EmployeePaymentCreate, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    tenant_id = tenant_context["tenant_id"]
+    emp = crud.get_employee(db, employee_id=employee_id, tenant_id=tenant_id)
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    return crud.create_employee_payment(db, employee_id=employee_id, payment=payment, tenant_id=tenant_id)
+
+
+# --- Customer Leads CRM Endpoints ---
+@app.get("/api/leads", response_model=List[schemas.Lead])
+def list_leads(skip: int = 0, limit: int = 1000, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    return crud.get_leads(db, tenant_id=tenant_context["tenant_id"], skip=skip, limit=limit)
+
+@app.post("/api/leads", response_model=schemas.Lead)
+def create_lead(lead: schemas.LeadCreate, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    return crud.create_lead(db, lead=lead, tenant_id=tenant_context["tenant_id"])
+
+@app.put("/api/leads/{lead_id}", response_model=schemas.Lead)
+def update_lead(lead_id: int, lead_update: schemas.LeadUpdate, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    updated = crud.update_lead(db, lead_id=lead_id, lead_update=lead_update, tenant_id=tenant_context["tenant_id"])
+    if not updated:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    return updated
+
+@app.delete("/api/leads/{lead_id}")
+def delete_lead(lead_id: int, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    deleted = crud.delete_lead(db, lead_id=lead_id, tenant_id=tenant_context["tenant_id"])
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    return {"message": "Lead deleted successfully"}
+
+
+# --- Invoice Quotations Endpoints ---
+@app.get("/api/quotations", response_model=List[schemas.Quotation])
+def list_quotations(skip: int = 0, limit: int = 1000, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    return crud.get_quotations(db, tenant_id=tenant_context["tenant_id"], skip=skip, limit=limit)
+
+@app.post("/api/quotations", response_model=schemas.Quotation)
+def create_quotation(quotation: schemas.QuotationCreate, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    return crud.create_quotation(db, quotation=quotation, tenant_id=tenant_context["tenant_id"])
+
+@app.put("/api/quotations/{quotation_id}", response_model=schemas.Quotation)
+def update_quotation(quotation_id: int, quotation_update: schemas.QuotationUpdate, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    updated = crud.update_quotation(db, quotation_id=quotation_id, quotation_update=quotation_update, tenant_id=tenant_context["tenant_id"])
+    if not updated:
+        raise HTTPException(status_code=404, detail="Quotation not found")
+    return updated
+
+@app.delete("/api/quotations/{quotation_id}")
+def delete_quotation(quotation_id: int, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    deleted = crud.delete_quotation(db, quotation_id=quotation_id, tenant_id=tenant_context["tenant_id"])
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Quotation not found")
+    return {"message": "Quotation deleted successfully"}
+
+
+# --- Receipts Endpoints ---
+@app.get("/api/receipts", response_model=List[schemas.Receipt])
+def list_receipts(skip: int = 0, limit: int = 1000, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    return crud.get_receipts(db, tenant_id=tenant_context["tenant_id"], skip=skip, limit=limit)
+
+@app.post("/api/receipts", response_model=schemas.Receipt)
+def create_receipt(receipt: schemas.ReceiptCreate, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    return crud.create_receipt(db, receipt=receipt, tenant_id=tenant_context["tenant_id"])
+
+@app.delete("/api/receipts/{receipt_id}")
+def delete_receipt(receipt_id: int, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    deleted = crud.delete_receipt(db, receipt_id=receipt_id, tenant_id=tenant_context["tenant_id"])
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+    return {"message": "Receipt deleted successfully"}
 
 
 # --- Serve React Frontend SPA build ---

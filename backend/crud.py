@@ -1,4 +1,4 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from backend import models, schemas
 from datetime import datetime, date
 from fastapi import HTTPException, status
@@ -575,6 +575,10 @@ def get_investor_financial_summary(db: Session, investor_id: int, tenant_id: str
     # Payouts received
     payouts = db.query(models.InvestorPayout).filter(models.InvestorPayout.investor_id == investor_id, models.InvestorPayout.tenant_id == tenant_id).all()
     tot_payouts = sum(p.amount for p in payouts)
+    effective_payout_type = getattr(db_investor, "payout_type", "percentage") or "percentage"
+    effective_fixed_amount = float(getattr(db_investor, "fixed_amount", 0.0) or 0.0)
+    if effective_payout_type == "fixed":
+        tot_investor_earnings = effective_fixed_amount
     payout_balance_due = tot_investor_earnings - tot_payouts
 
     return schemas.InvestorFinancialSummary(
@@ -584,7 +588,9 @@ def get_investor_financial_summary(db: Session, investor_id: int, tenant_id: str
         email=db_investor.email,
         cnic_number=db_investor.cnic_number,
         investment_amount=db_investor.investment_amount,
+        payout_type=effective_payout_type,
         profit_share_percentage=db_investor.profit_share_percentage,
+        fixed_amount=effective_fixed_amount,
         joined_date=db_investor.joined_date,
         notes=db_investor.notes,
         total_cars_owned=len(investor_cars),
@@ -759,6 +765,10 @@ def get_shareholder_financial_summary(db: Session, shareholder_id: int, tenant_i
     # Payouts received
     payouts = db.query(models.ShareholderPayout).filter(models.ShareholderPayout.shareholder_id == shareholder_id, models.ShareholderPayout.tenant_id == tenant_id).all()
     tot_payouts = sum(p.amount for p in payouts)
+    effective_payout_type = getattr(db_shareholder, "payout_type", "percentage") or "percentage"
+    effective_fixed_amount = float(getattr(db_shareholder, "fixed_amount", 0.0) or 0.0)
+    if effective_payout_type == "fixed":
+        tot_shareholder_earnings = effective_fixed_amount
     payout_balance_due = tot_shareholder_earnings - tot_payouts
 
     return schemas.ShareholderFinancialSummary(
@@ -768,7 +778,9 @@ def get_shareholder_financial_summary(db: Session, shareholder_id: int, tenant_i
         email=db_shareholder.email,
         cnic_number=db_shareholder.cnic_number,
         investment_amount=db_shareholder.investment_amount,
+        payout_type=effective_payout_type,
         share_percentage=db_shareholder.share_percentage,
+        fixed_amount=effective_fixed_amount,
         joined_date=db_shareholder.joined_date,
         notes=db_shareholder.notes,
         total_cars_owned=len(shareholder_cars),
@@ -783,4 +795,171 @@ def get_shareholder_financial_summary(db: Session, shareholder_id: int, tenant_i
         car_performance=car_performance_list,
         payouts=[schemas.ShareholderPayout.from_orm(p) for p in payouts]
     )
+
+
+# --- Employees & Payments CRUD ---
+def get_employees(db: Session, tenant_id: str, skip: int = 0, limit: int = 1000):
+    return (
+        db.query(models.Employee)
+        .options(joinedload(models.Employee.payments))
+        .filter(models.Employee.tenant_id == tenant_id)
+        .order_by(models.Employee.id.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+def get_employee(db: Session, employee_id: int, tenant_id: str):
+    return (
+        db.query(models.Employee)
+        .options(joinedload(models.Employee.payments))
+        .filter(models.Employee.id == employee_id, models.Employee.tenant_id == tenant_id)
+        .first()
+    )
+
+def create_employee(db: Session, employee: schemas.EmployeeCreate, tenant_id: str):
+    db_emp = models.Employee(**employee.dict(), tenant_id=tenant_id)
+    db.add(db_emp)
+    db.commit()
+    db.refresh(db_emp)
+    return db_emp
+
+def update_employee(db: Session, employee_id: int, employee_update: schemas.EmployeeUpdate, tenant_id: str):
+    db_emp = get_employee(db, employee_id, tenant_id)
+    if not db_emp:
+        return None
+    for key, value in employee_update.dict(exclude_unset=True).items():
+        setattr(db_emp, key, value)
+    db.commit()
+    db.refresh(db_emp)
+    return db_emp
+
+def delete_employee(db: Session, employee_id: int, tenant_id: str):
+    db_emp = get_employee(db, employee_id, tenant_id)
+    if db_emp:
+        db.delete(db_emp)
+        db.commit()
+    return db_emp
+
+def create_employee_payment(db: Session, employee_id: int, payment: schemas.EmployeePaymentCreate, tenant_id: str):
+    db_payment = models.EmployeePayment(**payment.dict(), employee_id=employee_id, tenant_id=tenant_id)
+    db.add(db_payment)
+    db.commit()
+    db.refresh(db_payment)
+    return db_payment
+
+
+# --- Leads CRM CRUD ---
+def get_leads(db: Session, tenant_id: str, skip: int = 0, limit: int = 1000):
+    return (
+        db.query(models.Lead)
+        .filter(models.Lead.tenant_id == tenant_id)
+        .order_by(models.Lead.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+def get_lead(db: Session, lead_id: int, tenant_id: str):
+    return db.query(models.Lead).filter(models.Lead.id == lead_id, models.Lead.tenant_id == tenant_id).first()
+
+def create_lead(db: Session, lead: schemas.LeadCreate, tenant_id: str):
+    db_lead = models.Lead(**lead.dict(), tenant_id=tenant_id)
+    db.add(db_lead)
+    db.commit()
+    db.refresh(db_lead)
+    return db_lead
+
+def update_lead(db: Session, lead_id: int, lead_update: schemas.LeadUpdate, tenant_id: str):
+    db_lead = get_lead(db, lead_id, tenant_id)
+    if not db_lead:
+        return None
+    for key, value in lead_update.dict(exclude_unset=True).items():
+        setattr(db_lead, key, value)
+    db.commit()
+    db.refresh(db_lead)
+    return db_lead
+
+def delete_lead(db: Session, lead_id: int, tenant_id: str):
+    db_lead = get_lead(db, lead_id, tenant_id)
+    if db_lead:
+        db.delete(db_lead)
+        db.commit()
+    return db_lead
+
+
+# --- Quotations CRUD ---
+def get_quotations(db: Session, tenant_id: str, skip: int = 0, limit: int = 1000):
+    return (
+        db.query(models.Quotation)
+        .filter(models.Quotation.tenant_id == tenant_id)
+        .order_by(models.Quotation.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+def get_quotation(db: Session, quotation_id: int, tenant_id: str):
+    return db.query(models.Quotation).filter(models.Quotation.id == quotation_id, models.Quotation.tenant_id == tenant_id).first()
+
+def create_quotation(db: Session, quotation: schemas.QuotationCreate, tenant_id: str):
+    data = quotation.dict()
+    if not data.get("quote_number"):
+        count = db.query(models.Quotation).filter(models.Quotation.tenant_id == tenant_id).count()
+        data["quote_number"] = f"QT-{1001 + count}"
+    db_q = models.Quotation(**data, tenant_id=tenant_id)
+    db.add(db_q)
+    db.commit()
+    db.refresh(db_q)
+    return db_q
+
+def update_quotation(db: Session, quotation_id: int, quotation_update: schemas.QuotationUpdate, tenant_id: str):
+    db_q = get_quotation(db, quotation_id, tenant_id)
+    if not db_q:
+        return None
+    for key, value in quotation_update.dict(exclude_unset=True).items():
+        setattr(db_q, key, value)
+    db.commit()
+    db.refresh(db_q)
+    return db_q
+
+def delete_quotation(db: Session, quotation_id: int, tenant_id: str):
+    db_q = get_quotation(db, quotation_id, tenant_id)
+    if db_q:
+        db.delete(db_q)
+        db.commit()
+    return db_q
+
+
+# --- Receipts CRUD ---
+def get_receipts(db: Session, tenant_id: str, skip: int = 0, limit: int = 1000):
+    return (
+        db.query(models.Receipt)
+        .filter(models.Receipt.tenant_id == tenant_id)
+        .order_by(models.Receipt.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+def get_receipt(db: Session, receipt_id: int, tenant_id: str):
+    return db.query(models.Receipt).filter(models.Receipt.id == receipt_id, models.Receipt.tenant_id == tenant_id).first()
+
+def create_receipt(db: Session, receipt: schemas.ReceiptCreate, tenant_id: str):
+    data = receipt.dict()
+    if not data.get("receipt_number"):
+        count = db.query(models.Receipt).filter(models.Receipt.tenant_id == tenant_id).count()
+        data["receipt_number"] = f"RCP-{1001 + count}"
+    db_r = models.Receipt(**data, tenant_id=tenant_id)
+    db.add(db_r)
+    db.commit()
+    db.refresh(db_r)
+    return db_r
+
+def delete_receipt(db: Session, receipt_id: int, tenant_id: str):
+    db_r = get_receipt(db, receipt_id, tenant_id)
+    if db_r:
+        db.delete(db_r)
+        db.commit()
+    return db_r
 

@@ -5,6 +5,7 @@ from typing import Optional, List, Dict
 # Cars
 class CarBase(BaseModel):
     plate_number: str
+    chassis_number: Optional[str] = None
     make_model: str
     model_year: int
     color: str
@@ -30,6 +31,7 @@ class CarCreate(CarBase):
 
 class CarUpdate(BaseModel):
     plate_number: Optional[str] = None
+    chassis_number: Optional[str] = None
     make_model: Optional[str] = None
     model_year: Optional[int] = None
     color: Optional[str] = None
@@ -69,11 +71,17 @@ class CustomerBase(BaseModel):
     cnic_back_path: Optional[str] = None
     license_front_path: Optional[str] = None
     license_expiry_date: Optional[date] = None
+    cheque_number: Optional[str] = None
+    passport_number: Optional[str] = None
+    guarantor_name: Optional[str] = None
+    guarantor_phone: Optional[str] = None
+    guarantor_cnic: Optional[str] = None
+    guarantor_address: Optional[str] = None
+    guarantee_details: Optional[str] = None
 
     @field_validator('cnic_number')
     @classmethod
     def validate_cnic(cls, v):
-        # Strip any hyphens if user entered them, but enforce exactly 13 digits
         cleaned = v.replace("-", "").strip()
         if not cleaned.isdigit() or len(cleaned) != 13:
             raise ValueError("CNIC number must be exactly a 13-digit string")
@@ -93,6 +101,13 @@ class CustomerUpdate(BaseModel):
     cnic_back_path: Optional[str] = None
     license_front_path: Optional[str] = None
     license_expiry_date: Optional[date] = None
+    cheque_number: Optional[str] = None
+    passport_number: Optional[str] = None
+    guarantor_name: Optional[str] = None
+    guarantor_phone: Optional[str] = None
+    guarantor_cnic: Optional[str] = None
+    guarantor_address: Optional[str] = None
+    guarantee_details: Optional[str] = None
 
 class Customer(CustomerBase):
     id: int
@@ -239,6 +254,9 @@ class TenantBase(BaseModel):
     contact_name: str
     operational_manager: str
     is_active: bool = True
+    plan_type: str = "standard"
+    subscription_status: str = "active"
+    trial_ends_at: Optional[date] = None
     feature_flags: List[str] = []
     branding_settings: Dict[str, str] = {}
 
@@ -252,10 +270,15 @@ class TenantUpdate(BaseModel):
     contact_name: Optional[str] = None
     operational_manager: Optional[str] = None
     is_active: Optional[bool] = None
+    plan_type: Optional[str] = None
+    subscription_status: Optional[str] = None
+    trial_ends_at: Optional[date] = None
     feature_flags: Optional[List[str]] = None
     branding_settings: Optional[Dict[str, str]] = None
 
 class Tenant(TenantBase):
+    created_at: Optional[datetime] = None
+
     class Config:
         from_attributes = True
 
@@ -286,7 +309,9 @@ class InvestorBase(BaseModel):
     email: Optional[str] = None
     cnic_number: Optional[str] = None
     investment_amount: float = 0.0
+    payout_type: str = "percentage"  # "percentage" | "fixed"
     profit_share_percentage: float = 70.0
+    fixed_amount: float = 0.0
     joined_date: date
     notes: Optional[str] = None
 
@@ -299,7 +324,9 @@ class InvestorUpdate(BaseModel):
     email: Optional[str] = None
     cnic_number: Optional[str] = None
     investment_amount: Optional[float] = None
+    payout_type: Optional[str] = None
     profit_share_percentage: Optional[float] = None
+    fixed_amount: Optional[float] = None
     joined_date: Optional[date] = None
     notes: Optional[str] = None
     assigned_car_ids: Optional[List[int]] = None
@@ -330,7 +357,9 @@ class InvestorFinancialSummary(BaseModel):
     email: Optional[str] = None
     cnic_number: Optional[str] = None
     investment_amount: float
+    payout_type: str = "percentage"
     profit_share_percentage: float
+    fixed_amount: float = 0.0
     joined_date: date
     notes: Optional[str] = None
     total_cars_owned: int
@@ -368,7 +397,9 @@ class ShareholderBase(BaseModel):
     email: Optional[str] = None
     cnic_number: Optional[str] = None
     investment_amount: float = 0.0
+    payout_type: str = "percentage"  # "percentage" | "fixed"
     share_percentage: float = 50.0
+    fixed_amount: float = 0.0
     joined_date: date
     notes: Optional[str] = None
 
@@ -381,7 +412,9 @@ class ShareholderUpdate(BaseModel):
     email: Optional[str] = None
     cnic_number: Optional[str] = None
     investment_amount: Optional[float] = None
+    payout_type: Optional[str] = None
     share_percentage: Optional[float] = None
+    fixed_amount: Optional[float] = None
     joined_date: Optional[date] = None
     notes: Optional[str] = None
     assigned_car_ids: Optional[List[int]] = None
@@ -413,7 +446,9 @@ class ShareholderFinancialSummary(BaseModel):
     email: Optional[str] = None
     cnic_number: Optional[str] = None
     investment_amount: float
+    payout_type: str = "percentage"
     share_percentage: float
+    fixed_amount: float = 0.0
     joined_date: date
     notes: Optional[str] = None
     total_cars_owned: int
@@ -428,4 +463,176 @@ class ShareholderFinancialSummary(BaseModel):
     car_performance: List[ShareholderCarPerformance] = []
     payouts: List[ShareholderPayout] = []
 
+# Employees & Salary Payments
+class EmployeePaymentBase(BaseModel):
+    amount: float = Field(..., gt=0)
+    payment_date: date
+    payment_method: str = "Cash"
+    month_label: Optional[str] = None
+    notes: Optional[str] = None
 
+class EmployeePaymentCreate(EmployeePaymentBase):
+    pass
+
+class EmployeePayment(EmployeePaymentBase):
+    id: int
+    tenant_id: str
+    employee_id: int
+
+    class Config:
+        from_attributes = True
+
+class EmployeeBase(BaseModel):
+    full_name: str
+    role: str = "Driver"
+    phone: str
+    cnic_number: Optional[str] = None
+    address: Optional[str] = None
+    license_number: Optional[str] = None
+    salary_type: str = "Monthly"
+    salary_amount: float = 0.0
+    joining_date: date
+    status: str = "Active"
+    notes: Optional[str] = None
+
+class EmployeeCreate(EmployeeBase):
+    pass
+
+class EmployeeUpdate(BaseModel):
+    full_name: Optional[str] = None
+    role: Optional[str] = None
+    phone: Optional[str] = None
+    cnic_number: Optional[str] = None
+    address: Optional[str] = None
+    license_number: Optional[str] = None
+    salary_type: Optional[str] = None
+    salary_amount: Optional[float] = None
+    joining_date: Optional[date] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+
+class Employee(EmployeeBase):
+    id: int
+    tenant_id: str
+    payments: List[EmployeePayment] = []
+
+    class Config:
+        from_attributes = True
+
+# Leads (Customer Inquiries CRM)
+class LeadBase(BaseModel):
+    full_name: str
+    phone: str
+    email: Optional[str] = None
+    interested_vehicle: Optional[str] = None
+    car_id: Optional[int] = None
+    pickup_date: Optional[date] = None
+    duration_days: int = 1
+    quoted_amount: Optional[float] = 0.0
+    source: str = "Phone Call"
+    status: str = "New"
+    follow_up_date: Optional[date] = None
+    notes: Optional[str] = None
+
+class LeadCreate(LeadBase):
+    pass
+
+class LeadUpdate(BaseModel):
+    full_name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    interested_vehicle: Optional[str] = None
+    car_id: Optional[int] = None
+    pickup_date: Optional[date] = None
+    duration_days: Optional[int] = None
+    quoted_amount: Optional[float] = None
+    source: Optional[str] = None
+    status: Optional[str] = None
+    follow_up_date: Optional[date] = None
+    notes: Optional[str] = None
+
+class Lead(LeadBase):
+    id: int
+    tenant_id: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+# Invoice Quotations
+class QuotationBase(BaseModel):
+    quote_number: Optional[str] = None
+    customer_name: str
+    customer_phone: str
+    customer_email: Optional[str] = None
+    company_name: Optional[str] = None
+    car_id: Optional[int] = None
+    vehicle_description: str
+    start_date: date
+    end_date: date
+    days: int = 1
+    daily_rate: float = 0.0
+    chauffeur_included: bool = False
+    chauffeur_daily_rate: float = 0.0
+    discount_amount: float = 0.0
+    tax_percentage: float = 0.0
+    total_amount: float = 0.0
+    valid_until: Optional[date] = None
+    status: str = "Draft"
+    notes: Optional[str] = None
+
+class QuotationCreate(QuotationBase):
+    pass
+
+class QuotationUpdate(BaseModel):
+    customer_name: Optional[str] = None
+    customer_phone: Optional[str] = None
+    customer_email: Optional[str] = None
+    company_name: Optional[str] = None
+    car_id: Optional[int] = None
+    vehicle_description: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    days: Optional[int] = None
+    daily_rate: Optional[float] = None
+    chauffeur_included: Optional[bool] = None
+    chauffeur_daily_rate: Optional[float] = None
+    discount_amount: Optional[float] = None
+    tax_percentage: Optional[float] = None
+    total_amount: Optional[float] = None
+    valid_until: Optional[date] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+
+class Quotation(QuotationBase):
+    id: int
+    tenant_id: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+# Payment & Deposit Receipts
+class ReceiptBase(BaseModel):
+    receipt_number: Optional[str] = None
+    receipt_type: str = "Booking Payment"
+    booking_id: Optional[int] = None
+    customer_name: str
+    customer_phone: Optional[str] = None
+    vehicle_info: Optional[str] = None
+    amount: float = Field(..., gt=0)
+    payment_method: str = "Cash"
+    reference_no: Optional[str] = None
+    receipt_date: date
+    notes: Optional[str] = None
+
+class ReceiptCreate(ReceiptBase):
+    pass
+
+class Receipt(ReceiptBase):
+    id: int
+    tenant_id: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

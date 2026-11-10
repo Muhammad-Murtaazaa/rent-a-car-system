@@ -12,20 +12,32 @@ if is_sqlite:
     os.makedirs("app_data/documents", exist_ok=True)
     os.makedirs("app_data/backups", exist_ok=True)
     engine = create_engine(
-        SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+        SQLALCHEMY_DATABASE_URL,
+        connect_args={"check_same_thread": False, "timeout": 15},
+        pool_pre_ping=True,
     )
-    
-    # Enable Foreign Key constraints in SQLite
+
+    # High-speed, low-RAM SQLite PRAGMAs (WAL mode allows concurrent reads without locks)
     @event.listens_for(engine, "connect")
     def set_sqlite_pragma(dbapi_connection, connection_record):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA temp_store=MEMORY")
+        cursor.execute("PRAGMA cache_size=-8000")  # ~8MB page cache for fast queries with minimal RAM
+        cursor.execute("PRAGMA busy_timeout=5000")
         cursor.close()
 else:
     # Fix potential postgres:// vs postgresql:// scheme issue from services like Heroku/Render
     if SQLALCHEMY_DATABASE_URL.startswith("postgres://"):
         SQLALCHEMY_DATABASE_URL = SQLALCHEMY_DATABASE_URL.replace("postgres://", "postgresql://", 1)
-    engine = create_engine(SQLALCHEMY_DATABASE_URL)
+    engine = create_engine(
+        SQLALCHEMY_DATABASE_URL,
+        pool_size=5,
+        max_overflow=10,
+        pool_pre_ping=True,
+    )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

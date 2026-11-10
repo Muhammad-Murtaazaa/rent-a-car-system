@@ -1,3 +1,4 @@
+from datetime import datetime
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Date, ForeignKey, JSON
 from sqlalchemy.orm import relationship
 from backend.database import Base
@@ -8,6 +9,7 @@ class Car(Base):
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(String, nullable=False, index=True, default="default")
     plate_number = Column(String, unique=True, index=True, nullable=False)
+    chassis_number = Column(String, nullable=True, index=True)
     make_model = Column(String, nullable=False)
     model_year = Column(Integer, nullable=False)
     color = Column(String, nullable=False)
@@ -43,7 +45,9 @@ class Investor(Base):
     email = Column(String, nullable=True)
     cnic_number = Column(String, nullable=True)
     investment_amount = Column(Float, nullable=False, default=0.0)
+    payout_type = Column(String, nullable=False, default="percentage")  # "percentage" | "fixed"
     profit_share_percentage = Column(Float, nullable=False, default=70.0) # Default investor share %
+    fixed_amount = Column(Float, nullable=False, default=0.0)  # Fixed agreed amount if payout_type == "fixed"
     joined_date = Column(Date, nullable=False)
     notes = Column(String, nullable=True)
 
@@ -78,6 +82,13 @@ class Customer(Base):
     cnic_back_path = Column(String, nullable=True)
     license_front_path = Column(String, nullable=True)
     license_expiry_date = Column(Date, nullable=True)
+    cheque_number = Column(String, nullable=True)
+    passport_number = Column(String, nullable=True)
+    guarantor_name = Column(String, nullable=True)
+    guarantor_phone = Column(String, nullable=True)
+    guarantor_cnic = Column(String, nullable=True)
+    guarantor_address = Column(String, nullable=True)
+    guarantee_details = Column(String, nullable=True)
 
     bookings = relationship("Booking", back_populates="customer")
 
@@ -170,7 +181,9 @@ class Shareholder(Base):
     email = Column(String, nullable=True)
     cnic_number = Column(String, nullable=True)
     investment_amount = Column(Float, nullable=False, default=0.0)
+    payout_type = Column(String, nullable=False, default="percentage")  # "percentage" | "fixed"
     share_percentage = Column(Float, nullable=False, default=50.0)
+    fixed_amount = Column(Float, nullable=False, default=0.0)  # Fixed agreed amount if payout_type == "fixed"
     joined_date = Column(Date, nullable=False)
     notes = Column(String, nullable=True)
 
@@ -200,5 +213,105 @@ class Tenant(Base):
     contact_name = Column(String, nullable=False)
     operational_manager = Column(String, nullable=False)
     is_active = Column(Boolean, nullable=False, default=True)
+    plan_type = Column(String, nullable=False, default="standard")  # "trial_7d", "monthly", "yearly", "lifetime", "standard"
+    subscription_status = Column(String, nullable=False, default="active")  # "trialing", "active", "expired", "suspended"
+    trial_ends_at = Column(Date, nullable=True)
+    created_at = Column(DateTime, nullable=True, default=datetime.utcnow)
     feature_flags = Column(JSON, nullable=False, default=list) # e.g. ["whatsapp_api", "advanced_analytics"]
     branding_settings = Column(JSON, nullable=False, default=dict)
+
+class Employee(Base):
+    __tablename__ = "employees"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(String, nullable=False, index=True, default="default")
+    full_name = Column(String, nullable=False)
+    role = Column(String, nullable=False, default="Driver")  # Driver, Desk Staff, Manager, Mechanic, Washer, Accountant
+    phone = Column(String, nullable=False)
+    cnic_number = Column(String, nullable=True)
+    address = Column(String, nullable=True)
+    license_number = Column(String, nullable=True)
+    salary_type = Column(String, nullable=False, default="Monthly")  # Monthly, Daily, Per Trip
+    salary_amount = Column(Float, nullable=False, default=0.0)
+    joining_date = Column(Date, nullable=False)
+    status = Column(String, nullable=False, default="Active")  # Active, On Leave, Inactive
+    notes = Column(String, nullable=True)
+
+    payments = relationship("EmployeePayment", back_populates="employee", cascade="all, delete-orphan")
+
+class EmployeePayment(Base):
+    __tablename__ = "employee_payments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(String, nullable=False, index=True, default="default")
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False)
+    amount = Column(Float, nullable=False)
+    payment_date = Column(Date, nullable=False)
+    payment_method = Column(String, nullable=False, default="Cash")
+    month_label = Column(String, nullable=True)
+    notes = Column(String, nullable=True)
+
+    employee = relationship("Employee", back_populates="payments")
+
+class Lead(Base):
+    __tablename__ = "leads"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(String, nullable=False, index=True, default="default")
+    full_name = Column(String, nullable=False)
+    phone = Column(String, nullable=False)
+    email = Column(String, nullable=True)
+    interested_vehicle = Column(String, nullable=True)
+    car_id = Column(Integer, ForeignKey("cars.id"), nullable=True)
+    pickup_date = Column(Date, nullable=True)
+    duration_days = Column(Integer, nullable=False, default=1)
+    quoted_amount = Column(Float, nullable=True, default=0.0)
+    source = Column(String, nullable=False, default="Phone Call")  # Walk-in, Phone Call, WhatsApp, Social Media, Website, Referral
+    status = Column(String, nullable=False, default="New")  # New, Contacted, Quoted, Converted, Lost
+    follow_up_date = Column(Date, nullable=True)
+    notes = Column(String, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+class Quotation(Base):
+    __tablename__ = "quotations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(String, nullable=False, index=True, default="default")
+    quote_number = Column(String, nullable=False, index=True)
+    customer_name = Column(String, nullable=False)
+    customer_phone = Column(String, nullable=False)
+    customer_email = Column(String, nullable=True)
+    company_name = Column(String, nullable=True)
+    car_id = Column(Integer, ForeignKey("cars.id"), nullable=True)
+    vehicle_description = Column(String, nullable=False)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    days = Column(Integer, nullable=False, default=1)
+    daily_rate = Column(Float, nullable=False, default=0.0)
+    chauffeur_included = Column(Boolean, nullable=False, default=False)
+    chauffeur_daily_rate = Column(Float, nullable=False, default=0.0)
+    discount_amount = Column(Float, nullable=False, default=0.0)
+    tax_percentage = Column(Float, nullable=False, default=0.0)
+    total_amount = Column(Float, nullable=False, default=0.0)
+    valid_until = Column(Date, nullable=True)
+    status = Column(String, nullable=False, default="Draft")  # Draft, Sent, Accepted, Expired, Converted
+    notes = Column(String, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+class Receipt(Base):
+    __tablename__ = "receipts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(String, nullable=False, index=True, default="default")
+    receipt_number = Column(String, nullable=False, index=True)
+    receipt_type = Column(String, nullable=False, default="Booking Payment")  # Booking Payment, Security Deposit, Deposit Refund, Other Income
+    booking_id = Column(Integer, ForeignKey("bookings.id"), nullable=True)
+    customer_name = Column(String, nullable=False)
+    customer_phone = Column(String, nullable=True)
+    vehicle_info = Column(String, nullable=True)
+    amount = Column(Float, nullable=False)
+    payment_method = Column(String, nullable=False, default="Cash")
+    reference_no = Column(String, nullable=True)
+    receipt_date = Column(Date, nullable=False)
+    notes = Column(String, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)

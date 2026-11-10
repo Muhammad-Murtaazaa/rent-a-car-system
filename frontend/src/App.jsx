@@ -1,10 +1,14 @@
 import React, { useState, useEffect, useRef } from "react";
 import { 
   Car, Users, Calendar, ShieldAlert, Wrench, Wallet, Plus, 
-  Search, Trash2, Edit2, AlertTriangle, CheckCircle, FileText, Send, X, Clock, PenTool, TrendingUp, DollarSign, Sun, Moon, Briefcase, Menu, Eye, BarChart3, Download, Printer, PieChart, LineChart
+  Search, Trash2, Edit2, AlertTriangle, CheckCircle, FileText, Send, X, Clock, PenTool, TrendingUp, DollarSign, Sun, Moon, Briefcase, Menu, Eye, BarChart3, Download, Printer, PieChart, LineChart, UserPlus, Receipt, BadgeCheck, ClipboardList
 } from "lucide-react";
 import CarHistoryModal from "./CarHistoryModal";
 import SuperAdminDashboard from "./SuperAdminDashboard";
+import EmployeesView from "./EmployeesView";
+import LeadsView from "./LeadsView";
+import QuotationsView from "./QuotationsView";
+import ReceiptsView from "./ReceiptsView";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter, Button, Badge, Input, GlowButton, GradientCard, ShimmerButton, AnimatedGradientText, MagicCard, BorderBeam, Progress, Separator } from "./shadcn";
 import { jsPDF } from "jspdf";
 import {
@@ -36,7 +40,12 @@ export default function App() {
   const [theme, setTheme] = useState("dark");
   const [activeTab, setActiveTab] = useState("dashboard");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [userRole, setUserRole] = useState("tenant_admin"); // "tenant_admin", "desk_staff", "super_admin"
+  const [userRole, setUserRole] = useState(() => {
+    if (typeof window !== "undefined" && (window.location.hash === "#admin" || window.location.pathname === "/admin")) {
+      return "super_admin";
+    }
+    return "tenant_admin";
+  });
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [historyCarId, setHistoryCarId] = useState(null);
   
@@ -56,6 +65,12 @@ export default function App() {
   const [financials, setFinancials] = useState([]);
   const [investors, setInvestors] = useState([]);
   const [shareholders, setShareholders] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [leads, setLeads] = useState([]);
+  const [quotations, setQuotations] = useState([]);
+  const [receipts, setReceipts] = useState([]);
+  const [prefillQuote, setPrefillQuote] = useState(null);
+  const [prefillCustomer, setPrefillCustomer] = useState(null);
 
   // Business Tool State (Profit Report Date)
   const [reportDate, setReportDate] = useState(new Date().toISOString().slice(0, 10));
@@ -134,40 +149,42 @@ export default function App() {
       .catch(() => {});
   }, []);
 
-  // Fetch all rows for dashboard totals (API default limit=100 drops newer payments)
+  // High-speed parallel fetch (reduces VPS latency and renders immediately)
   const fetchData = async () => {
     try {
       const q = "limit=10000";
-      const carsRes = await fetch(`/api/cars?${q}`);
-      setCars(await carsRes.json());
+      const [
+        carsRes, custRes, bookingsRes, maintRes, blRes,
+        alertsRes, finRes, invRes, shRes, empRes, leadsRes, quotesRes, rcptRes
+      ] = await Promise.all([
+        fetch(`/api/cars?${q}`),
+        fetch(`/api/customers?${q}`),
+        fetch(`/api/bookings?${q}`),
+        fetch(`/api/maintenance?${q}`),
+        fetch(`/api/blacklist?${q}`),
+        fetch("/api/alerts"),
+        fetch(`/api/financials?${q}`),
+        fetch(`/api/investors?${q}`),
+        fetch(`/api/shareholders?${q}`),
+        fetch(`/api/employees?limit=1000`),
+        fetch(`/api/leads?limit=1000`),
+        fetch(`/api/quotations?limit=1000`),
+        fetch(`/api/receipts?limit=1000`),
+      ]);
 
-      const custRes = await fetch(`/api/customers?${q}`);
-      setCustomers(await custRes.json());
-
-      const bookingsRes = await fetch(`/api/bookings?${q}`);
-      setBookings(await bookingsRes.json());
-
-      const maintRes = await fetch(`/api/maintenance?${q}`);
-      setMaintenance(await maintRes.json());
-
-      const blRes = await fetch(`/api/blacklist?${q}`);
-      setBlacklist(await blRes.json());
-
-      const alertsRes = await fetch("/api/alerts");
-      setAlerts(await alertsRes.json());
-
-      const finRes = await fetch(`/api/financials?${q}`);
-      setFinancials(await finRes.json());
-
-      const invRes = await fetch(`/api/investors?${q}`);
-      if (invRes.ok) {
-        setInvestors(await invRes.json());
-      }
-
-      const shRes = await fetch(`/api/shareholders?${q}`);
-      if (shRes.ok) {
-        setShareholders(await shRes.json());
-      }
+      if (carsRes.ok) setCars(await carsRes.json());
+      if (custRes.ok) setCustomers(await custRes.json());
+      if (bookingsRes.ok) setBookings(await bookingsRes.json());
+      if (maintRes.ok) setMaintenance(await maintRes.json());
+      if (blRes.ok) setBlacklist(await blRes.json());
+      if (alertsRes.ok) setAlerts(await alertsRes.json());
+      if (finRes.ok) setFinancials(await finRes.json());
+      if (invRes.ok) setInvestors(await invRes.json());
+      if (shRes.ok) setShareholders(await shRes.json());
+      if (empRes.ok) setEmployees(await empRes.json());
+      if (leadsRes.ok) setLeads(await leadsRes.json());
+      if (quotesRes.ok) setQuotations(await quotesRes.json());
+      if (rcptRes.ok) setReceipts(await rcptRes.json());
     } catch (err) {
       console.error("Error loading API data:", err);
     }
@@ -177,12 +194,11 @@ export default function App() {
     fetchData();
   }, []);
 
-  // Keep finance + bookings live: refresh on open + poll while viewing
+  // Gentle 30s background sync to keep VPS CPU/RAM minimal
   useEffect(() => {
-    const liveTabs = ["dashboard", "reports", "analytics", "investors", "shareholders", "bookings", "maintenance"];
+    const liveTabs = ["dashboard", "reports", "analytics", "investors", "shareholders", "bookings", "maintenance", "leads", "quotations", "receipts", "employees"];
     if (!liveTabs.includes(activeTab)) return;
-    fetchData();
-    const id = setInterval(fetchData, 4000);
+    const id = setInterval(fetchData, 30000);
     return () => clearInterval(id);
   }, [activeTab]);
 
@@ -348,6 +364,34 @@ export default function App() {
     return <SuperAdminDashboard userRole={userRole} setUserRole={setUserRole} />;
   }
 
+  if (branding.is_active === false || branding.subscription_status === "expired" || branding.subscription_status === "suspended") {
+    return (
+      <div className="min-h-screen bg-[var(--bg-app)] text-[var(--text-main)] flex items-center justify-center p-6">
+        <div className="glass-panel max-w-md w-full p-8 rounded-2xl border border-rose-500/30 text-center space-y-4">
+          <ShieldAlert className="h-14 w-14 text-rose-500 mx-auto" />
+          <h1 className="text-2xl font-bold">{branding.subscription_status === "expired" ? "7-Day Free Trial Ended" : "Account Suspended"}</h1>
+          <p className="text-xs text-[var(--text-muted)]">
+            {branding.subscription_status === "expired"
+              ? `Your 7-day free trial for ${branding.name} ended on ${branding.trial_ends_at}. Contact Omnysync support to activate your plan.`
+              : `Your workspace for ${branding.name} is currently paused. Contact Omnysync support.`}
+          </p>
+          <div className="pt-2 flex flex-col gap-2">
+            <a
+              href={`https://wa.me/${(branding.branding_settings?.support_phone || "923001234567").replace(/[^0-9]/g, "")}`}
+              target="_blank" rel="noreferrer"
+              className="btn-accent py-2.5 px-4 rounded-xl text-xs font-bold text-white"
+            >
+              Contact Support to Activate
+            </a>
+            <button onClick={() => setUserRole("super_admin")} className="text-[11px] text-[var(--text-muted)] hover:underline pt-2">
+              SaaS Operator Login
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col md:flex-row min-h-screen min-h-[100dvh] bg-[var(--bg-app)] text-[var(--text-main)] overflow-x-hidden">
       
@@ -451,7 +495,11 @@ export default function App() {
               { id: "dashboard", label: "Dashboard", icon: ShieldAlert },
               { id: "fleet", label: "Fleet", icon: Car },
               { id: "customers", label: "Customers", icon: Users },
+              { id: "leads", label: "Leads CRM", icon: UserPlus },
+              { id: "quotations", label: "Quotations", icon: ClipboardList },
               { id: "bookings", label: "Bookings", icon: Calendar },
+              { id: "receipts", label: "Receipts", icon: Receipt },
+              { id: "employees", label: "Employees", icon: BadgeCheck },
               { id: "maintenance", label: "Maintenance", icon: Wrench },
               { id: "document-vault", label: "Documents", icon: FileText },
               { id: "reports", label: "Reports", icon: BarChart3 },
@@ -460,8 +508,11 @@ export default function App() {
               { id: "investors", label: "Investors", icon: Briefcase },
               { id: "shareholders", label: "Shareholders", icon: Wallet }
             ].filter(tab => {
-              const coreTabs = ["dashboard", "fleet", "customers", "bookings", "maintenance", "blacklist", "document-vault", "reports", "analytics", "investors", "shareholders"];
-              return coreTabs.includes(tab.id) || branding.feature_flags?.includes(tab.id);
+              const toggleable = ["dashboard", "fleet", "customers", "leads", "quotations", "bookings", "receipts", "employees", "maintenance", "blacklist"];
+              if (toggleable.includes(tab.id) && branding.feature_flags?.length) {
+                return branding.feature_flags.includes(tab.id);
+              }
+              return true;
             }).map(tab => (
               <button
                 key={tab.id}
@@ -500,6 +551,19 @@ export default function App() {
       {/* Main Content Area */}
       <main className="flex-1 min-w-0 w-full p-3 sm:p-4 md:p-8 lg:p-10 overflow-x-hidden overflow-y-auto page-enter">
         
+        {/* 7-DAY FREE TRIAL BANNER */}
+        {branding.subscription_status === "trialing" && (
+          <div className="mb-5 px-4 py-3 rounded-xl border border-amber-500/30 bg-amber-500/10 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 text-amber-600 dark:text-amber-300 font-semibold">
+              <Clock className="h-4 w-4 shrink-0" />
+              <span>
+                7-Day Free Trial Active — {branding.trial_days_left !== null ? `${Math.max(0, branding.trial_days_left)} day(s) remaining` : "Active"} (Ends {branding.trial_ends_at})
+              </span>
+            </div>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-amber-500">Omnysync Trial Plan</span>
+          </div>
+        )}
+
         {/* TOP ALERT TOAST */}
         {errorMessage && (
           <div className="mb-6 p-4 rounded-xl border border-rose-500/30 bg-rose-500/5 flex items-center justify-between gap-3 text-rose-700 dark:text-rose-200 shadow-sm">
@@ -562,6 +626,74 @@ export default function App() {
             setEditingCustomer={setEditingCustomer}
             checkCnicBlacklist={checkCnicBlacklist}
             setErrorMessage={setErrorMessage}
+            prefillCustomer={prefillCustomer}
+            setPrefillCustomer={setPrefillCustomer}
+          />
+        )}
+        {activeTab === "leads" && (
+          <LeadsView
+            leads={leads}
+            cars={cars}
+            branding={branding}
+            fetchData={fetchData}
+            onCreateQuoteFromLead={(lead) => {
+              setPrefillQuote({
+                customer_name: lead.full_name,
+                customer_phone: lead.phone,
+                customer_email: lead.email || "",
+                car_id: lead.car_id || "",
+                vehicle_description: lead.interested_vehicle || "",
+                days: lead.duration_days || 1,
+                start_date: lead.pickup_date || new Date().toISOString().slice(0, 10),
+                end_date: lead.pickup_date || new Date().toISOString().slice(0, 10),
+                daily_rate: lead.quoted_amount && lead.duration_days ? Math.round(lead.quoted_amount / lead.duration_days) : 5000
+              });
+              setActiveTab("quotations");
+            }}
+            onConvertLeadToCustomer={(lead) => {
+              setPrefillCustomer({
+                full_name: lead.full_name,
+                phone_primary: lead.phone
+              });
+              setActiveTab("customers");
+            }}
+          />
+        )}
+        {activeTab === "quotations" && (
+          <QuotationsView
+            quotations={quotations}
+            cars={cars}
+            branding={branding}
+            fetchData={fetchData}
+            prefillQuote={prefillQuote}
+            setPrefillQuote={setPrefillQuote}
+            onConvertQuoteToBooking={(q) => {
+              setBookingForm(prev => ({
+                ...prev,
+                car_id: q.car_id || "",
+                daily_rate: q.daily_rate || 3000,
+                is_chauffeur_driven: !!q.chauffeur_included,
+                chauffeur_daily_wage: q.chauffeur_daily_rate || 1500,
+                booking_type: q.company_name ? "Company" : "Individual",
+                company_name: q.company_name || ""
+              }));
+              setActiveTab("bookings");
+              setShowBookingModal(true);
+            }}
+          />
+        )}
+        {activeTab === "receipts" && (
+          <ReceiptsView
+            receipts={receipts}
+            bookings={bookings}
+            branding={branding}
+            fetchData={fetchData}
+          />
+        )}
+        {activeTab === "employees" && (
+          <EmployeesView
+            employees={employees}
+            fetchData={fetchData}
           />
         )}
         {activeTab === "bookings" && (
@@ -1286,7 +1418,7 @@ function FleetView({
   investors = [], shareholders = [] 
 }) {
   const emptyCarForm = {
-    plate_number: "", make_model: "", model_year: 2026, color: "", 
+    plate_number: "", chassis_number: "", make_model: "", model_year: 2026, color: "", 
     engine_cc: 1300, current_odometer: 0, transmission_type: "Auto", 
     status: "Available", last_oil_change_odometer: 0, image_url: "",
     registration_doc_url: "", fitness_cert_url: "", token_tax_doc_url: "",
@@ -1304,6 +1436,7 @@ function FleetView({
 
       setForm({
         ...editingCar,
+        chassis_number: editingCar.chassis_number || "",
         image_url: editingCar.image_url || "",
         registration_doc_url: editingCar.registration_doc_url || "",
         fitness_cert_url: editingCar.fitness_cert_url || "",
@@ -1386,7 +1519,8 @@ function FleetView({
 
   const filtered = cars.filter(c => 
     c.plate_number.toLowerCase().includes(search.toLowerCase()) || 
-    c.make_model.toLowerCase().includes(search.toLowerCase())
+    c.make_model.toLowerCase().includes(search.toLowerCase()) ||
+    (c.chassis_number || "").toLowerCase().includes(search.toLowerCase())
   );
 
   return (
@@ -1409,7 +1543,7 @@ function FleetView({
         <Search className="absolute left-3 top-3.5 h-4 w-4 text-[var(--text-muted)]" />
         <input 
           type="text" 
-          placeholder="Search by Plate Number or Make/Model..." 
+          placeholder="Search by Plate, Chassis No or Make/Model..." 
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full app-input rounded-xl py-3 pl-10 pr-4 text-sm text-[var(--text-main)] focus:outline-none"
@@ -1465,6 +1599,7 @@ function FleetView({
                     <div>
                       <h3 className="text-lg font-bold text-[var(--text-main)] group-hover:text-[var(--accent-color)] transition-colors line-clamp-1">{car.make_model}</h3>
                       <p className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider font-mono mt-0.5">{car.color} • {car.engine_cc}cc • {car.transmission_type}</p>
+                      {car.chassis_number && <p className="text-[10px] text-teal-500 font-mono mt-0.5">Chassis: {car.chassis_number}</p>}
                     </div>
                   </div>
 
@@ -1571,6 +1706,17 @@ function FleetView({
                     className="w-full app-input rounded-lg p-2.5 focus:outline-none"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Chassis Number (VIN)</label>
+                <input 
+                  type="text"
+                  value={form.chassis_number || ""}
+                  onChange={(e) => setForm({...form, chassis_number: e.target.value})}
+                  placeholder="e.g. NZE161-7089234"
+                  className="w-full app-input rounded-lg p-2.5 font-mono focus:outline-none"
+                />
               </div>
 
               <div className="space-y-3">
@@ -1851,11 +1997,14 @@ function FleetView({
 // ==========================================
 // 3. CUSTOMERS COMPONENT
 // ==========================================
-function CustomersView({ customers, search, setSearch, fetchData, showModal, setShowModal, editingCustomer, setEditingCustomer, checkCnicBlacklist, setErrorMessage }) {
-  const [form, setForm] = useState({
+function CustomersView({ customers, search, setSearch, fetchData, showModal, setShowModal, editingCustomer, setEditingCustomer, checkCnicBlacklist, setErrorMessage, prefillCustomer, setPrefillCustomer }) {
+  const emptyCustForm = {
     full_name: "", phone_primary: "", phone_secondary: "", home_address: "",
-    cnic_number: "", license_number: "", license_expiry_date: ""
-  });
+    cnic_number: "", license_number: "", license_expiry_date: "",
+    cheque_number: "", passport_number: "",
+    guarantor_name: "", guarantor_phone: "", guarantor_cnic: "", guarantor_address: "", guarantee_details: ""
+  };
+  const [form, setForm] = useState(emptyCustForm);
   const [cnicFrontFile, setCnicFrontFile] = useState(null);
   const [cnicBackFile, setCnicBackFile] = useState(null);
   const [licenseFrontFile, setLicenseFrontFile] = useState(null);
@@ -1863,6 +2012,13 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
   const [blacklistWarning, setBlacklistWarning] = useState("");
 
   useEffect(() => {
+    if (prefillCustomer) {
+      setEditingCustomer(null);
+      setForm({ ...emptyCustForm, ...prefillCustomer });
+      setShowModal(true);
+      if (setPrefillCustomer) setPrefillCustomer(null);
+      return;
+    }
     if (editingCustomer) {
       setForm({
         full_name: editingCustomer.full_name || "",
@@ -1873,19 +2029,23 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
         license_number: editingCustomer.license_number || "",
         license_expiry_date: editingCustomer.license_expiry_date
           ? String(editingCustomer.license_expiry_date).slice(0, 10)
-          : ""
+          : "",
+        cheque_number: editingCustomer.cheque_number || "",
+        passport_number: editingCustomer.passport_number || "",
+        guarantor_name: editingCustomer.guarantor_name || "",
+        guarantor_phone: editingCustomer.guarantor_phone || "",
+        guarantor_cnic: editingCustomer.guarantor_cnic || "",
+        guarantor_address: editingCustomer.guarantor_address || "",
+        guarantee_details: editingCustomer.guarantee_details || ""
       });
     } else {
-      setForm({
-        full_name: "", phone_primary: "", phone_secondary: "", home_address: "",
-        cnic_number: "", license_number: "", license_expiry_date: ""
-      });
+      setForm(emptyCustForm);
     }
     setCnicFrontFile(null);
     setCnicBackFile(null);
     setLicenseFrontFile(null);
     setBlacklistWarning("");
-  }, [editingCustomer, showModal]);
+  }, [editingCustomer, showModal, prefillCustomer]);
 
   const handleCnicChange = (e) => {
     const val = e.target.value;
@@ -1912,6 +2072,13 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
     formData.append("cnic_number", form.cnic_number);
     formData.append("license_number", form.license_number);
     if (form.license_expiry_date) formData.append("license_expiry_date", form.license_expiry_date);
+    formData.append("cheque_number", form.cheque_number || "");
+    formData.append("passport_number", form.passport_number || "");
+    formData.append("guarantor_name", form.guarantor_name || "");
+    formData.append("guarantor_phone", form.guarantor_phone || "");
+    formData.append("guarantor_cnic", form.guarantor_cnic || "");
+    formData.append("guarantor_address", form.guarantor_address || "");
+    formData.append("guarantee_details", form.guarantee_details || "");
     
     if (cnicFrontFile) formData.append("cnic_front", cnicFrontFile);
     if (cnicBackFile) formData.append("cnic_back", cnicBackFile);
@@ -1946,7 +2113,10 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
 
   const filtered = customers.filter(c => 
     c.full_name.toLowerCase().includes(search.toLowerCase()) || 
-    c.cnic_number.includes(search)
+    c.cnic_number.includes(search) ||
+    (c.phone_primary || "").includes(search) ||
+    (c.passport_number || "").toLowerCase().includes(search.toLowerCase()) ||
+    (c.cheque_number || "").toLowerCase().includes(search.toLowerCase())
   );
 
   return (
@@ -1969,7 +2139,7 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
         <Search className="absolute left-3 top-3.5 h-4 w-4 text-[var(--text-muted)]" />
         <input 
           type="text" 
-          placeholder="Search by Customer Name or CNIC..." 
+          placeholder="Search by Name, CNIC, Phone, Passport or Cheque No..." 
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full app-input rounded-xl py-3 pl-10 pr-4 text-sm text-[var(--text-main)] focus:outline-none"
@@ -1981,9 +2151,9 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
           <thead>
             <tr className="bg-slate-900/20 border-b border-[var(--border-color)] text-[var(--text-muted)] text-xs font-semibold uppercase tracking-wider">
               <th className="p-4">Full Name</th>
-              <th className="p-4">CNIC Number</th>
-              <th className="p-4">Contact (Primary)</th>
-              <th className="p-4">License #</th>
+              <th className="p-4">CNIC / Passport</th>
+              <th className="p-4">Contact & Address</th>
+              <th className="p-4">Cheque / Guarantee</th>
               <th className="p-4">License Expiry</th>
               <th className="p-4">Documents</th>
               <th className="p-4 text-right">Actions</th>
@@ -1992,10 +2162,23 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
           <tbody className="divide-y divide-slate-850 text-sm">
             {filtered.map(cust => (
               <tr key={cust.id} className="hover:bg-[var(--tr-hover)] transition-colors">
-                <td className="p-4 font-bold text-[var(--text-main)]">{cust.full_name}</td>
-                <td className="p-4 font-mono">{cust.cnic_number}</td>
-                <td className="p-4">{cust.phone_primary}</td>
-                <td className="p-4">{cust.license_number}</td>
+                <td className="p-4 font-bold text-[var(--text-main)]">
+                  <div>{cust.full_name}</div>
+                  <div className="text-[10px] font-normal text-[var(--text-muted)]">Lic: {cust.license_number}</div>
+                </td>
+                <td className="p-4 font-mono text-xs">
+                  <div>{cust.cnic_number}</div>
+                  {cust.passport_number && <div className="text-[10px] text-teal-500">PP: {cust.passport_number}</div>}
+                </td>
+                <td className="p-4 text-xs">
+                  <div className="font-semibold">{cust.phone_primary}</div>
+                  <div className="text-[10px] text-[var(--text-muted)] max-w-[180px] truncate">{cust.home_address}</div>
+                </td>
+                <td className="p-4 text-xs">
+                  {cust.cheque_number && <div className="font-mono text-amber-500 font-bold">Chq: {cust.cheque_number}</div>}
+                  {cust.guarantor_name && <div className="text-[10px] text-[var(--text-muted)]">Guarantor: {cust.guarantor_name} ({cust.guarantor_phone || ""})</div>}
+                  {!cust.cheque_number && !cust.guarantor_name && <span className="text-[var(--text-muted)] italic text-[11px]">None</span>}
+                </td>
                 <td className="p-4 text-xs font-mono">
                   {cust.license_expiry_date ? String(cust.license_expiry_date).slice(0, 10) : <span className="italic text-[var(--text-muted)]">Not set</span>}
                 </td>
@@ -2169,8 +2352,47 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
                   disabled={!!blacklistWarning}
                   value={form.home_address}
                   onChange={(e) => setForm({...form, home_address: e.target.value})}
-                  className="w-full app-input rounded-lg p-2.5 focus:outline-none h-20 disabled:opacity-50"
+                  className="w-full app-input rounded-lg p-2.5 focus:outline-none h-16 disabled:opacity-50"
                 />
+              </div>
+
+              {/* Cheque, Passport & Guarantee Section */}
+              <div className="border-t border-[var(--border-color)] pt-3 space-y-3">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-teal-500">Cheque, Passport & Guarantee Details</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Security Cheque No</label>
+                    <input type="text" placeholder="e.g. CHQ-009281" value={form.cheque_number} onChange={(e) => setForm({...form, cheque_number: e.target.value})} className="w-full app-input rounded-lg p-2 font-mono" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Passport Number</label>
+                    <input type="text" placeholder="e.g. AB1234567" value={form.passport_number} onChange={(e) => setForm({...form, passport_number: e.target.value})} className="w-full app-input rounded-lg p-2 font-mono" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Guarantor Name</label>
+                    <input type="text" placeholder="Full Name" value={form.guarantor_name} onChange={(e) => setForm({...form, guarantor_name: e.target.value})} className="w-full app-input rounded-lg p-2" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Guarantor Phone</label>
+                    <input type="text" placeholder="03001234567" value={form.guarantor_phone} onChange={(e) => setForm({...form, guarantor_phone: e.target.value})} className="w-full app-input rounded-lg p-2" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Guarantor CNIC</label>
+                    <input type="text" placeholder="35201xxxxxxx" value={form.guarantor_cnic} onChange={(e) => setForm({...form, guarantor_cnic: e.target.value})} className="w-full app-input rounded-lg p-2 font-mono" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Guarantor Address</label>
+                    <input type="text" placeholder="Address" value={form.guarantor_address} onChange={(e) => setForm({...form, guarantor_address: e.target.value})} className="w-full app-input rounded-lg p-2" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Guarantee Details / Collateral Notes</label>
+                  <input type="text" placeholder="e.g. Blank Signed Cheque + Original Passport Held" value={form.guarantee_details} onChange={(e) => setForm({...form, guarantee_details: e.target.value})} className="w-full app-input rounded-lg p-2" />
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -4670,7 +4892,9 @@ function InvestorsView({ investors, cars, financials = [], bookings = [], mainte
     email: "",
     cnic_number: "",
     investment_amount: 0,
+    payout_type: "percentage",
     profit_share_percentage: 70,
+    fixed_amount: 0,
     joined_date: new Date().toISOString().slice(0, 10),
     notes: "",
     assigned_car_ids: []
@@ -4693,7 +4917,9 @@ function InvestorsView({ investors, cars, financials = [], bookings = [], mainte
         email: editingInvestor.email || "",
         cnic_number: editingInvestor.cnic_number || "",
         investment_amount: editingInvestor.investment_amount || 0,
+        payout_type: editingInvestor.payout_type || "percentage",
         profit_share_percentage: editingInvestor.profit_share_percentage || 70,
+        fixed_amount: editingInvestor.fixed_amount || 0,
         joined_date: editingInvestor.joined_date || new Date().toISOString().slice(0, 10),
         notes: editingInvestor.notes || "",
         assigned_car_ids: editingInvestor.cars ? editingInvestor.cars.map(c => c.id) : []
@@ -4705,7 +4931,9 @@ function InvestorsView({ investors, cars, financials = [], bookings = [], mainte
         email: "",
         cnic_number: "",
         investment_amount: 0,
+        payout_type: "percentage",
         profit_share_percentage: 70,
+        fixed_amount: 0,
         joined_date: new Date().toISOString().slice(0, 10),
         notes: "",
         assigned_car_ids: []
@@ -4993,7 +5221,7 @@ function InvestorsView({ investors, cars, financials = [], bookings = [], mainte
                       </span>
                     </td>
                     <td className="p-4 align-middle font-mono font-semibold text-[var(--text-main)]">
-                      {inv.profit_share_percentage}%
+                      {inv.payout_type === "fixed" ? `Fixed PKR ${(inv.fixed_amount || 0).toLocaleString()}` : `${inv.profit_share_percentage}%`}
                     </td>
                     <td className="p-4 align-middle font-mono text-emerald-700 dark:text-emerald-400 font-bold whitespace-nowrap">
                       PKR {inv.total_revenue_generated?.toLocaleString()}
@@ -5079,7 +5307,7 @@ function InvestorsView({ investors, cars, financials = [], bookings = [], mainte
                 </div>
                 <div className="bg-[var(--bg-app)] rounded-lg p-2 border border-[var(--border-color)]">
                   <span className="text-[9px] uppercase text-[var(--text-muted)] block">Share / Cars</span>
-                  <span className="font-mono font-bold text-[var(--text-main)]">{inv.profit_share_percentage}% · {inv.total_cars_owned} car(s)</span>
+                  <span className="font-mono font-bold text-[var(--text-main)]">{inv.payout_type === "fixed" ? `Fixed PKR ${(inv.fixed_amount || 0).toLocaleString()}` : `${inv.profit_share_percentage}%`} · {inv.total_cars_owned} car(s)</span>
                 </div>
                 <div className="bg-[var(--bg-app)] rounded-lg p-2 border border-[var(--border-color)]">
                   <span className="text-[9px] uppercase text-[var(--text-muted)] block">Earnings</span>
@@ -5304,14 +5532,38 @@ function InvestorsView({ investors, cars, financials = [], bookings = [], mainte
                 </div>
 
                 <div>
-                  <label className="block text-[10px] uppercase font-bold text-[var(--text-muted)] mb-1">Profit Share Rate (%) *</label>
-                  <input 
-                    type="number" required min="0" max="100" step="0.5"
-                    value={form.profit_share_percentage}
-                    onChange={(e) => setForm({ ...form, profit_share_percentage: parseFloat(e.target.value) || 0 })}
-                    className="w-full app-input rounded-xl p-2.5 font-mono"
-                  />
+                  <label className="block text-[10px] uppercase font-bold text-[var(--text-muted)] mb-1">Payout Agreement Type</label>
+                  <select
+                    value={form.payout_type || "percentage"}
+                    onChange={(e) => setForm({ ...form, payout_type: e.target.value })}
+                    className="w-full app-input rounded-xl p-2.5"
+                  >
+                    <option value="percentage">Percentage Share (%)</option>
+                    <option value="fixed">Fixed Agreed Amount (PKR)</option>
+                  </select>
                 </div>
+
+                {form.payout_type === "fixed" ? (
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-amber-500 mb-1">Fixed Amount To Pay (PKR) *</label>
+                    <input 
+                      type="number" required min="0" step="500"
+                      value={form.fixed_amount}
+                      onChange={(e) => setForm({ ...form, fixed_amount: parseFloat(e.target.value) || 0 })}
+                      className="w-full app-input rounded-xl p-2.5 font-mono border-amber-500/40"
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-[var(--text-muted)] mb-1">Profit Share Rate (%) *</label>
+                    <input 
+                      type="number" required min="0" max="100" step="0.5"
+                      value={form.profit_share_percentage}
+                      onChange={(e) => setForm({ ...form, profit_share_percentage: parseFloat(e.target.value) || 0 })}
+                      className="w-full app-input rounded-xl p-2.5 font-mono"
+                    />
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-[10px] uppercase font-bold text-[var(--text-muted)] mb-1">Onboarding Date *</label>
@@ -5480,7 +5732,9 @@ function ShareholdersView({ shareholders, cars, financials = [], bookings = [], 
     email: "",
     cnic_number: "",
     investment_amount: 0,
+    payout_type: "percentage",
     share_percentage: 50,
+    fixed_amount: 0,
     joined_date: new Date().toISOString().slice(0, 10),
     notes: "",
     assigned_car_ids: []
@@ -5503,7 +5757,9 @@ function ShareholdersView({ shareholders, cars, financials = [], bookings = [], 
         email: editingShareholder.email || "",
         cnic_number: editingShareholder.cnic_number || "",
         investment_amount: editingShareholder.investment_amount || 0,
+        payout_type: editingShareholder.payout_type || "percentage",
         share_percentage: editingShareholder.share_percentage || 50,
+        fixed_amount: editingShareholder.fixed_amount || 0,
         joined_date: editingShareholder.joined_date || new Date().toISOString().slice(0, 10),
         notes: editingShareholder.notes || "",
         assigned_car_ids: editingShareholder.cars ? editingShareholder.cars.map(c => c.id) : []
@@ -5515,7 +5771,9 @@ function ShareholdersView({ shareholders, cars, financials = [], bookings = [], 
         email: "",
         cnic_number: "",
         investment_amount: 0,
+        payout_type: "percentage",
         share_percentage: 50,
+        fixed_amount: 0,
         joined_date: new Date().toISOString().slice(0, 10),
         notes: "",
         assigned_car_ids: []
@@ -5788,7 +6046,7 @@ function ShareholdersView({ shareholders, cars, financials = [], bookings = [], 
                         </span>
                       </td>
                       <td className="p-4 align-middle font-mono font-semibold text-[var(--text-main)]">
-                        {sh.share_percentage}%
+                        {sh.payout_type === "fixed" ? `Fixed PKR ${(sh.fixed_amount || 0).toLocaleString()}` : `${sh.share_percentage}%`}
                       </td>
                       <td className="p-4 align-middle font-mono text-emerald-700 dark:text-emerald-400 font-bold whitespace-nowrap">
                         PKR {sh.total_revenue_generated?.toLocaleString()}
@@ -5872,7 +6130,7 @@ function ShareholdersView({ shareholders, cars, financials = [], bookings = [], 
                 </div>
                 <div className="bg-[var(--bg-app)] rounded-lg p-2 border border-[var(--border-color)]">
                   <span className="text-[9px] uppercase text-[var(--text-muted)] block">Share / Cars</span>
-                  <span className="font-mono font-bold text-[var(--text-main)]">{sh.share_percentage}% · {sh.total_cars_owned} car(s)</span>
+                  <span className="font-mono font-bold text-[var(--text-main)]">{sh.payout_type === "fixed" ? `Fixed PKR ${(sh.fixed_amount || 0).toLocaleString()}` : `${sh.share_percentage}%`} · {sh.total_cars_owned} car(s)</span>
                 </div>
                 <div className="bg-[var(--bg-app)] rounded-lg p-2 border border-[var(--border-color)]">
                   <span className="text-[9px] uppercase text-[var(--text-muted)] block">Earnings</span>
@@ -6089,7 +6347,7 @@ function ShareholdersView({ shareholders, cars, financials = [], bookings = [], 
               </div>
 
               <div className="grid grid-cols-3 gap-4">
-                <div className="col-span-2">
+                <div>
                   <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Invested Capital (PKR) *</label>
                   <input 
                     type="number" required
@@ -6099,14 +6357,37 @@ function ShareholdersView({ shareholders, cars, financials = [], bookings = [], 
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Share Cut % *</label>
-                  <input 
-                    type="number" step="0.1" min="0" max="100" required
-                    value={form.share_percentage}
-                    onChange={(e) => setForm({...form, share_percentage: parseFloat(e.target.value) || 50})}
+                  <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Payout Type</label>
+                  <select
+                    value={form.payout_type || "percentage"}
+                    onChange={(e) => setForm({...form, payout_type: e.target.value})}
                     className="w-full app-input rounded-lg p-2.5 focus:outline-none"
-                  />
+                  >
+                    <option value="percentage">Percentage (%)</option>
+                    <option value="fixed">Fixed Amount (PKR)</option>
+                  </select>
                 </div>
+                {form.payout_type === "fixed" ? (
+                  <div>
+                    <label className="block text-xs font-semibold text-amber-500 mb-1">Fixed Amount (PKR) *</label>
+                    <input 
+                      type="number" step="500" min="0" required
+                      value={form.fixed_amount}
+                      onChange={(e) => setForm({...form, fixed_amount: parseFloat(e.target.value) || 0})}
+                      className="w-full app-input rounded-lg p-2.5 focus:outline-none"
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Share Cut % *</label>
+                    <input 
+                      type="number" step="0.1" min="0" max="100" required
+                      value={form.share_percentage}
+                      onChange={(e) => setForm({...form, share_percentage: parseFloat(e.target.value) || 50})}
+                      className="w-full app-input rounded-lg p-2.5 focus:outline-none"
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -6753,7 +7034,7 @@ function ReportsView({ cars, bookings, customers, financials, maintenance, inves
                       <tr key={inv.investor_id} className="hover:bg-[var(--tr-hover)]">
                         <td className="p-3 font-sans font-bold text-[var(--text-main)]">
                           {inv.full_name}
-                          <span className="block text-[10px] text-[var(--text-muted)] font-mono">{inv.profit_share_percentage}% share · {inv.total_cars_owned} cars</span>
+                          <span className="block text-[10px] text-[var(--text-muted)] font-mono">{inv.payout_type === "fixed" ? `Fixed PKR ${(inv.fixed_amount || 0).toLocaleString()}` : `${inv.profit_share_percentage}%`} share · {inv.total_cars_owned} cars</span>
                         </td>
                         <td className="p-3 text-right">PKR {(inv.investment_amount || 0).toLocaleString()}</td>
                         <td className="p-3 text-right text-emerald-700 dark:text-emerald-400">PKR {(inv.total_revenue_generated || 0).toLocaleString()}</td>
@@ -7511,7 +7792,7 @@ function DocumentVaultView({ customers, cars, investors, fetchData }) {
             </CardHeader>
             <CardContent className="p-4">
               <div className="text-[11px] text-[var(--text-muted)] space-y-1">
-                <p>Profit Share: <span className="text-[var(--text-main)] font-semibold">{inv.profit_share_percentage}%</span></p>
+                <p>Profit Share: <span className="text-[var(--text-main)] font-semibold">{inv.payout_type === "fixed" ? `Fixed PKR ${(inv.fixed_amount || 0).toLocaleString()}` : `${inv.profit_share_percentage}%`}</span></p>
                 <p>Capital: <span className="text-[var(--text-main)] font-semibold">PKR {inv.investment_amount?.toLocaleString()}</span></p>
                 <p>Fleet Revenue: <span className="text-emerald-700 dark:text-emerald-400 font-semibold">PKR {(inv.total_revenue_generated || 0).toLocaleString()}</span></p>
                 <p>Paid Out / Due: <span className="text-blue-700 dark:text-blue-400 font-semibold">PKR {(inv.total_payouts_received || 0).toLocaleString()}</span>
