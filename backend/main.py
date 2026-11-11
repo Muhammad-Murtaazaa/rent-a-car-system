@@ -10,6 +10,7 @@ from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, sta
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session, joinedload
 
@@ -1377,6 +1378,22 @@ def delete_official_letter(letter_id: int, db: Session = Depends(get_db), tenant
 
 # --- Serve React Frontend SPA build ---
 if os.path.exists("frontend/dist"):
+    @app.get("/sw.js")
+    def serve_service_worker():
+        return FileResponse(
+            "frontend/dist/sw.js",
+            media_type="application/javascript",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Service-Worker-Allowed": "/"}
+        )
+
+    @app.get("/manifest.webmanifest")
+    def serve_manifest():
+        return FileResponse(
+            "frontend/dist/manifest.webmanifest",
+            media_type="application/manifest+json",
+            headers={"Cache-Control": "no-cache"}
+        )
+
     app.mount("/", StaticFiles(directory="frontend/dist", html=True), name="frontend")
 else:
     @app.get("/")

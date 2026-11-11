@@ -214,7 +214,7 @@ export function initOfflineSync() {
 
   // Register Service Worker immediately on 1st open and warm all app shell assets
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("/sw.js").then(() => {
+    navigator.serviceWorker.register("/sw.js?v=3", { updateViaCache: "none" }).then(() => {
       warmAppShellOnFirstOpen();
     }).catch((err) => {
       console.warn("SW registration skipped:", err);
