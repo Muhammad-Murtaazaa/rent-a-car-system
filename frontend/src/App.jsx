@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { 
   Car, Users, Calendar, ShieldAlert, Wrench, Wallet, Plus, 
-  Search, Trash2, Edit2, AlertTriangle, CheckCircle, FileText, Send, X, Clock, PenTool, TrendingUp, DollarSign, Sun, Moon, Briefcase, Menu, Eye, BarChart3, Download, Printer, PieChart, LineChart, UserPlus, Receipt, BadgeCheck, ClipboardList, ScrollText, Settings as SettingsIcon
+  Search, Trash2, Edit2, AlertTriangle, CheckCircle, FileText, Send, X, Clock, PenTool, TrendingUp, DollarSign, Sun, Moon, Briefcase, Menu, Eye, BarChart3, Download, Printer, PieChart, LineChart, UserPlus, Receipt, BadgeCheck, ClipboardList, ScrollText, Settings as SettingsIcon, Wifi, WifiOff, RefreshCw, Smartphone
 } from "lucide-react";
 import CarHistoryModal from "./CarHistoryModal";
 import SuperAdminDashboard from "./SuperAdminDashboard";
@@ -11,6 +11,7 @@ import QuotationsView from "./QuotationsView";
 import ReceiptsView from "./ReceiptsView";
 import InvoicesLettersView from "./InvoicesLettersView";
 import SettingsView from "./SettingsView";
+import { syncOfflineQueue, getPendingSyncCount } from "./offlineSync";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter, Button, Badge, Input, GlowButton, GradientCard, ShimmerButton, AnimatedGradientText, MagicCard, BorderBeam, Progress, Separator } from "./shadcn";
 import { jsPDF } from "jspdf";
 import {
@@ -75,6 +76,12 @@ export default function App() {
   const [officialLetters, setOfficialLetters] = useState([]);
   const [prefillQuote, setPrefillQuote] = useState(null);
   const [prefillCustomer, setPrefillCustomer] = useState(null);
+
+  // PWA Online / Offline Sync & Install Prompt State
+  const [isOnline, setIsOnline] = useState(() => (typeof navigator !== "undefined" ? navigator.onLine : true));
+  const [pendingSyncCount, setPendingSyncCount] = useState(0);
+  const [syncingNow, setSyncingNow] = useState(false);
+  const [installPrompt, setInstallPrompt] = useState(null);
 
   // Business Tool State (Profit Report Date)
   const [reportDate, setReportDate] = useState(new Date().toISOString().slice(0, 10));
@@ -215,6 +222,57 @@ export default function App() {
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, []);
+
+  useEffect(() => {
+    getPendingSyncCount().then(setPendingSyncCount);
+    const onOnline = () => setIsOnline(true);
+    const onOffline = () => setIsOnline(false);
+    const onQueueChange = (e) => {
+      if (e?.detail?.count !== undefined) setPendingSyncCount(e.detail.count);
+      else getPendingSyncCount().then(setPendingSyncCount);
+    };
+    const onSyncComplete = () => {
+      getPendingSyncCount().then(setPendingSyncCount);
+      fetchData();
+    };
+    const onBeforeInstall = (e) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+    };
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    window.addEventListener("racms-offline-change", onQueueChange);
+    window.addEventListener("racms-sync-complete", onSyncComplete);
+    window.addEventListener("beforeinstallprompt", onBeforeInstall);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+      window.removeEventListener("racms-offline-change", onQueueChange);
+      window.removeEventListener("racms-sync-complete", onSyncComplete);
+      window.removeEventListener("beforeinstallprompt", onBeforeInstall);
+    };
+  }, []);
+
+  const handleManualSync = async () => {
+    if (!isOnline || syncingNow) return;
+    setSyncingNow(true);
+    try {
+      await syncOfflineQueue();
+      await fetchData();
+    } finally {
+      setSyncingNow(false);
+      getPendingSyncCount().then(setPendingSyncCount);
+    }
+  };
+
+  const handleInstallPWA = async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    const choice = await installPrompt.userChoice;
+    if (choice?.outcome === "accepted") {
+      setInstallPrompt(null);
+    }
+  };
 
   // --- Blacklist validation check ---
   const checkCnicBlacklist = async (cnic, setBlacklistState) => {
@@ -552,8 +610,42 @@ export default function App() {
               <option value="super_admin">Super Admin</option>
             </select>
           </div>
+          {/* PWA Offline & Sync Indicator */}
+          <div className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-app)] text-[11px]">
+            <div className="flex items-center gap-1.5 min-w-0">
+              {isOnline ? (
+                <Wifi className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+              ) : (
+                <WifiOff className="h-3.5 w-3.5 text-amber-500 shrink-0 animate-pulse" />
+              )}
+              <span className={`font-semibold truncate ${isOnline ? "text-emerald-500" : "text-amber-500"}`}>
+                {isOnline ? (pendingSyncCount > 0 ? `${pendingSyncCount} Pending` : "Online · Synced") : "Offline Mode"}
+              </span>
+            </div>
+            {isOnline && pendingSyncCount > 0 && (
+              <button
+                type="button"
+                onClick={handleManualSync}
+                disabled={syncingNow}
+                className="text-[10px] font-bold px-2 py-0.5 rounded bg-teal-500 text-white flex items-center gap-1 shrink-0"
+              >
+                <RefreshCw className={`h-2.5 w-2.5 ${syncingNow ? "animate-spin" : ""}`} /> Sync
+              </button>
+            )}
+          </div>
+
+          {installPrompt && (
+            <button
+              type="button"
+              onClick={handleInstallPWA}
+              className="w-full py-2 px-3 rounded-lg bg-teal-500/15 text-teal-500 border border-teal-500/30 hover:bg-teal-500/25 text-xs font-bold flex items-center justify-center gap-1.5 transition-all"
+            >
+              <Smartphone className="h-3.5 w-3.5" /> Install App (PWA)
+            </button>
+          )}
+
           <p className="text-[11px] text-[var(--text-muted)] leading-snug text-left">
-            {branding.branding_settings?.footer_status_text || "Offline backup ready"}
+            {branding.branding_settings?.footer_status_text || "Offline PWA ready"}
           </p>
         </div>
       </aside>
@@ -561,6 +653,33 @@ export default function App() {
       {/* Main Content Area */}
       <main className="flex-1 min-w-0 w-full p-3 sm:p-4 md:p-8 lg:p-10 overflow-x-hidden overflow-y-auto page-enter">
         
+        {/* OFFLINE / PENDING SYNC BANNER */}
+        {(!isOnline || pendingSyncCount > 0) && (
+          <div className={`mb-4 px-4 py-2.5 rounded-xl border flex flex-wrap items-center justify-between gap-2 text-xs ${
+            !isOnline
+              ? "border-amber-500/40 bg-amber-500/10 text-amber-500"
+              : "border-teal-500/30 bg-teal-500/10 text-teal-500"
+          }`}>
+            <div className="flex items-center gap-2 font-semibold">
+              {!isOnline ? <WifiOff className="h-4 w-4 shrink-0" /> : <RefreshCw className="h-4 w-4 shrink-0 animate-spin" />}
+              <span>
+                {!isOnline
+                  ? `You are working Offline — All cached data is available & ${pendingSyncCount} new change(s) are queued to auto-sync when internet returns.`
+                  : `Connection restored — ${pendingSyncCount} offline change(s) ready to sync to server.`}
+              </span>
+            </div>
+            {isOnline && (
+              <button
+                type="button"
+                onClick={handleManualSync}
+                className="px-3 py-1 rounded-lg bg-teal-500 text-white font-bold text-[11px]"
+              >
+                Sync Now
+              </button>
+            )}
+          </div>
+        )}
+
         {/* 7-DAY FREE TRIAL BANNER */}
         {branding.subscription_status === "trialing" && (
           <div className="mb-5 px-4 py-3 rounded-xl border border-amber-500/30 bg-amber-500/10 flex flex-wrap items-center justify-between gap-2 text-xs">
