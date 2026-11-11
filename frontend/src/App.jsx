@@ -11,7 +11,7 @@ import QuotationsView from "./QuotationsView";
 import ReceiptsView from "./ReceiptsView";
 import InvoicesLettersView from "./InvoicesLettersView";
 import SettingsView from "./SettingsView";
-import { syncOfflineQueue, getPendingSyncCount } from "./offlineSync";
+import { syncOfflineQueue, getPendingSyncCount, warmExtraUrls } from "./offlineSync";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter, Button, Badge, Input, GlowButton, GradientCard, ShimmerButton, AnimatedGradientText, MagicCard, BorderBeam, Progress, Separator } from "./shadcn";
 import { jsPDF } from "jspdf";
 import {
@@ -82,6 +82,7 @@ export default function App() {
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
   const [syncingNow, setSyncingNow] = useState(false);
   const [installPrompt, setInstallPrompt] = useState(null);
+  const [offlineReady, setOfflineReady] = useState(false);
 
   // Business Tool State (Profit Report Date)
   const [reportDate, setReportDate] = useState(new Date().toISOString().slice(0, 10));
@@ -185,7 +186,13 @@ export default function App() {
         fetch(`/api/letters?limit=1000`),
       ]);
 
-      if (carsRes.ok) setCars(await carsRes.json());
+      if (carsRes.ok) {
+        const loadedCars = await carsRes.json();
+        setCars(loadedCars);
+        const imgUrls = loadedCars.map(c => c.image_url).filter(Boolean);
+        if (branding?.logo_url) imgUrls.push(branding.logo_url);
+        warmExtraUrls(imgUrls);
+      }
       if (custRes.ok) setCustomers(await custRes.json());
       if (bookingsRes.ok) setBookings(await bookingsRes.json());
       if (maintRes.ok) setMaintenance(await maintRes.json());
@@ -243,12 +250,15 @@ export default function App() {
     window.addEventListener("offline", onOffline);
     window.addEventListener("racms-offline-change", onQueueChange);
     window.addEventListener("racms-sync-complete", onSyncComplete);
+    const onOfflineReady = () => setOfflineReady(true);
+    window.addEventListener("racms-offline-ready", onOfflineReady);
     window.addEventListener("beforeinstallprompt", onBeforeInstall);
     return () => {
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);
       window.removeEventListener("racms-offline-change", onQueueChange);
       window.removeEventListener("racms-sync-complete", onSyncComplete);
+      window.removeEventListener("racms-offline-ready", onOfflineReady);
       window.removeEventListener("beforeinstallprompt", onBeforeInstall);
     };
   }, []);
@@ -619,7 +629,7 @@ export default function App() {
                 <WifiOff className="h-3.5 w-3.5 text-amber-500 shrink-0 animate-pulse" />
               )}
               <span className={`font-semibold truncate ${isOnline ? "text-emerald-500" : "text-amber-500"}`}>
-                {isOnline ? (pendingSyncCount > 0 ? `${pendingSyncCount} Pending` : "Online · Synced") : "Offline Mode"}
+                {isOnline ? (pendingSyncCount > 0 ? `${pendingSyncCount} Pending` : (offlineReady ? "Online · Offline-Ready" : "Online · Synced")) : "Offline Mode"}
               </span>
             </div>
             {isOnline && pendingSyncCount > 0 && (

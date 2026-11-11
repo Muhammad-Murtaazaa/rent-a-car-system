@@ -79,6 +79,41 @@ export async function getPendingSyncCount() {
   }
 }
 
+export async function warmExtraUrls(urls = []) {
+  if (!("serviceWorker" in navigator) || !navigator.onLine) return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const worker = reg.active || navigator.serviceWorker.controller;
+    if (worker && urls.length > 0) {
+      worker.postMessage({ type: "WARM_URLS", urls: [...new Set(urls.filter(Boolean))] });
+    }
+  } catch {}
+}
+
+function warmAppShellOnFirstOpen() {
+  if (!("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.ready.then((reg) => {
+    const urls = new Set(["/", "/index.html", "/manifest.webmanifest", "/api/tenant/branding"]);
+    document.querySelectorAll('script[src], link[rel="stylesheet"][href], link[rel="icon"][href]').forEach((el) => {
+      const u = el.getAttribute("src") || el.getAttribute("href");
+      if (u && u.startsWith("/")) urls.add(u);
+    });
+    const worker = reg.active || navigator.serviceWorker.controller;
+    if (worker) {
+      worker.postMessage({ type: "WARM_URLS", urls: Array.from(urls) });
+    }
+  }).catch(() => {});
+}
+
+async function registerBackgroundSync() {
+  if ("serviceWorker" in navigator && "SyncManager" in window) {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      await reg.sync.register("racms-outbox-sync");
+    } catch {}
+  }
+}
+
 async function serializeBody(body) {
   if (!body) return { bodyType: "none", bodyData: null, previewObj: {} };
   if (body instanceof FormData) {
@@ -150,11 +185,9 @@ export async function syncOfflineQueue() {
           await idbDelete(OUTBOX_STORE, item.id);
           if (res.ok) syncedCount++;
         } else {
-          // Server 5xx: pause sync and retry later
           break;
         }
       } catch {
-        // Still offline / unreachable
         break;
       }
     }
@@ -174,12 +207,27 @@ export function initOfflineSync() {
   if (window.__racmsOfflineInit) return;
   window.__racmsOfflineInit = true;
 
-  // Register Service Worker
+  // Request persistent storage so the device never evicts cached offline data
+  if (navigator.storage && navigator.storage.persist) {
+    navigator.storage.persist().catch(() => {});
+  }
+
+  // Register Service Worker immediately on 1st open and warm all app shell assets
   if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => {
-      navigator.serviceWorker.register("/sw.js").catch((err) => {
-        console.warn("SW registration skipped:", err);
-      });
+    navigator.serviceWorker.register("/sw.js").then(() => {
+      warmAppShellOnFirstOpen();
+    }).catch((err) => {
+      console.warn("SW registration skipped:", err);
+    });
+
+    navigator.serviceWorker.addEventListener("message", (event) => {
+      if (event.data?.type === "OFFLINE_READY") {
+        window.dispatchEvent(new CustomEvent("racms-offline-ready"));
+      }
+      if (event.data?.type === "BG_SYNC_COMPLETE") {
+        getPendingSyncCount().then(notifyQueueChange);
+        window.dispatchEvent(new CustomEvent("racms-sync-complete", { detail: { syncedCount: event.data.syncedCount } }));
+      }
     });
   }
 
@@ -188,7 +236,6 @@ export function initOfflineSync() {
     const urlStr = typeof input === "string" ? input : input?.url || "";
     const method = (init.method || (typeof input !== "string" && input?.method) || "GET").toUpperCase();
 
-    // Only manage same-origin /api/ calls (skip /api/health & auth)
     const isApiCall = urlStr.startsWith("/api/") && !urlStr.startsWith("/api/health") && !urlStr.startsWith("/api/auth/");
     if (!isApiCall) {
       return originalFetch(input, init);
@@ -210,7 +257,6 @@ export function initOfflineSync() {
         const cached = await idbGet(CACHE_STORE, basePath).catch(() => null);
         let payload = cached ? cached.data : [];
 
-        // Merge any offline-created items queued for this collection
         if (Array.isArray(payload)) {
           const outbox = await idbGetAll(OUTBOX_STORE).catch(() => []);
           const pendingCreates = outbox
@@ -246,6 +292,7 @@ export function initOfflineSync() {
       });
       const count = await getPendingSyncCount();
       notifyQueueChange(count);
+      await registerBackgroundSync();
       return makeJsonResponse(
         { ...previewObj, id: -id, _offline_queued: true, message: "Saved offline. Will auto-sync when connected." },
         { "X-Offline-Queued": "1" }
@@ -264,9 +311,14 @@ export function initOfflineSync() {
     }
   };
 
-  // Auto-sync when connection returns
+  // Auto-sync when connection returns or tab becomes visible
   window.addEventListener("online", () => {
-    setTimeout(() => syncOfflineQueue(), 800);
+    setTimeout(() => syncOfflineQueue(), 500);
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && navigator.onLine) {
+      syncOfflineQueue();
+    }
   });
 
   // Periodic retry every 15s if online & outbox is non-empty
