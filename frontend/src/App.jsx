@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { 
   Car, Users, Calendar, ShieldAlert, Wrench, Wallet, Plus, 
-  Search, Trash2, Edit2, AlertTriangle, CheckCircle, FileText, Send, X, Clock, PenTool, TrendingUp, DollarSign, Sun, Moon, Briefcase, Menu, Eye, BarChart3, Download, Printer, PieChart, LineChart, UserPlus, Receipt, BadgeCheck, ClipboardList, ScrollText
+  Search, Trash2, Edit2, AlertTriangle, CheckCircle, FileText, Send, X, Clock, PenTool, TrendingUp, DollarSign, Sun, Moon, Briefcase, Menu, Eye, BarChart3, Download, Printer, PieChart, LineChart, UserPlus, Receipt, BadgeCheck, ClipboardList, ScrollText, Settings as SettingsIcon
 } from "lucide-react";
 import CarHistoryModal from "./CarHistoryModal";
 import SuperAdminDashboard from "./SuperAdminDashboard";
@@ -10,6 +10,7 @@ import LeadsView from "./LeadsView";
 import QuotationsView from "./QuotationsView";
 import ReceiptsView from "./ReceiptsView";
 import InvoicesLettersView from "./InvoicesLettersView";
+import SettingsView from "./SettingsView";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter, Button, Badge, Input, GlowButton, GradientCard, ShimmerButton, AnimatedGradientText, MagicCard, BorderBeam, Progress, Separator } from "./shadcn";
 import { jsPDF } from "jspdf";
 import {
@@ -462,7 +463,7 @@ export default function App() {
                     alt={branding.name || "Rent A Car Management System"} 
                     className="h-10 max-w-[160px] object-contain object-left filter dark:brightness-110" 
                   />
-                  <span className="text-[10px] text-[var(--text-muted)] font-medium tracking-wide">Lahore hub</span>
+                  <span className="text-[10px] text-[var(--text-muted)] font-medium tracking-wide">{branding.branding_settings?.hub_label || "Lahore hub"}</span>
                 </div>
               ) : (
                 <>
@@ -473,7 +474,7 @@ export default function App() {
                     <AnimatedGradientText className="text-sm font-semibold tracking-tight block truncate">
                       {branding.name || "Rent A Car Management System"}
                     </AnimatedGradientText>
-                    <span className="text-[11px] text-[var(--text-muted)] font-medium tracking-wide">Lahore hub</span>
+                    <span className="text-[11px] text-[var(--text-muted)] font-medium tracking-wide">{branding.branding_settings?.hub_label || "Lahore hub"}</span>
                   </div>
                 </>
               )}
@@ -514,7 +515,8 @@ export default function App() {
               { id: "analytics", label: "Analytics", icon: PieChart },
               { id: "blacklist", label: "Blacklist", icon: AlertTriangle },
               { id: "investors", label: "Investors", icon: Briefcase },
-              { id: "shareholders", label: "Shareholders", icon: Wallet }
+              { id: "shareholders", label: "Shareholders", icon: Wallet },
+              { id: "settings", label: "Settings", icon: SettingsIcon }
             ].filter(tab => {
               const toggleable = ["dashboard", "fleet", "customers", "leads", "quotations", "bookings", "receipts", "employees", "maintenance", "blacklist"];
               if (toggleable.includes(tab.id) && branding.feature_flags?.length) {
@@ -809,6 +811,9 @@ export default function App() {
             investors={investors}
             fetchData={fetchData}
           />
+        )}
+        {activeTab === "settings" && (
+          <SettingsView branding={branding} setBranding={setBranding} />
         )}
 
         {/* Dynamic Security Advance Receipt Printable Modal */}

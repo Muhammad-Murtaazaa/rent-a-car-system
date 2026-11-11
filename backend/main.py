@@ -1045,6 +1045,19 @@ def update_own_tenant_branding(
         "branding_settings": db_tenant.branding_settings or {}
     }
 
+@app.post("/api/tenant/upload-logo")
+def upload_tenant_logo(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    tenant_context: dict = Depends(get_tenant_context)
+):
+    safe_url = upload_file_securely(file)
+    db_tenant = crud.get_tenant(db, tenant_context["tenant_id"])
+    if db_tenant:
+        db_tenant.logo_url = safe_url
+        db.commit()
+    return {"logo_url": safe_url}
+
 
 # --- Investors & Tracing Endpoints ---
 @app.get("/api/investors", response_model=List[schemas.InvestorFinancialSummary])

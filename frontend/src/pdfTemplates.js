@@ -19,10 +19,28 @@ function hexToRgb(hex) {
   return [230, 138, 30];
 }
 
+async function loadLogoDataUrl(url) {
+  if (!url) return null;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
 function getAgencyInfo(branding) {
   const s = branding?.branding_settings || {};
   return {
     name: branding?.name || "Rent A Car Management System",
+    logo_url: branding?.logo_url || "",
     tagline: s.tagline || "TOURS & TRAVELS",
     address: s.address || "Lahore, Pakistan",
     phone: s.support_phone || "0300-1234567",
@@ -32,12 +50,13 @@ function getAgencyInfo(branding) {
     bank_name: s.bank_name || "",
     account_title: s.account_title || branding?.name || "Rent A Car Management System",
     account_number: s.account_number || "",
+    sign_label: s.sign_label || "sign",
     terms: s.terms_and_conditions || "By accepting this invoice, you agree to the rental period, payment terms, security deposit, responsible vehicle use, damage responsibility, maintenance coverage, insurance terms, liability waiver, cancellation policy, and dispute resolution.",
     accentRgb: hexToRgb(s.pdf_accent_color || "#e68a1e")
   };
 }
 
-function drawDocChrome(doc, titleTop, titleBottom, agency) {
+function drawDocChrome(doc, titleTop, titleBottom, agency, logoDataUrl) {
   const [r, g, b] = agency.accentRgb;
 
   // Top-left slanted accent ribbon
@@ -45,15 +64,24 @@ function drawDocChrome(doc, titleTop, titleBottom, agency) {
   doc.triangle(0, 0, 115, 0, 103, 10, "F");
   doc.rect(0, 0, 103, 10, "F");
 
-  // Agency Title & Address (Top Left)
+  // Optional Logo + Agency Title & Address (Top Left)
+  let textX = 18;
+  if (logoDataUrl) {
+    try {
+      doc.addImage(logoDataUrl, 18, 17, 22, 16, undefined, "FAST");
+      textX = 44;
+    } catch {
+      textX = 18;
+    }
+  }
   doc.setTextColor(25, 25, 28);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(13);
-  doc.text(agency.name.toUpperCase(), 18, 28);
+  doc.text(agency.name.toUpperCase(), textX, 26);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(80, 80, 90);
-  doc.text(agency.address, 18, 34);
+  doc.text(agency.address, textX, 32);
 
   // Document Main Title (Top Right)
   doc.setTextColor(25, 25, 28);
@@ -98,12 +126,13 @@ function drawFooter(doc, agency, termsText) {
 }
 
 // 1. OFFICIAL LETTERHEAD PDF (Matches PDF 1)
-export function generateLetterheadPDF(letter, branding) {
+export async function generateLetterheadPDF(letter, branding) {
   const doc = new jsPDF();
   const agency = getAgencyInfo(branding);
   const [r, g, b] = agency.accentRgb;
+  const logoDataUrl = await loadLogoDataUrl(agency.logo_url);
 
-  // Top orange/accent banner
+  // Top accent banner
   doc.setFillColor(r, g, b);
   doc.rect(0, 0, 210, 56, "F");
 
@@ -116,12 +145,22 @@ export function generateLetterheadPDF(letter, branding) {
   doc.triangle(18, 0, 36, 44, 48, 44, "F");
 
   // Agency Name & Tagline
+  const titleRight = logoDataUrl ? 168 : 194;
   doc.setTextColor(20, 20, 22);
   doc.setFont("times", "bold");
-  doc.setFontSize(22);
-  doc.text(agency.name.toUpperCase(), 68, 18);
-  doc.setFontSize(17);
-  doc.text((agency.tagline || "TOURS & TRAVELS").toUpperCase(), 68, 27);
+  doc.setFontSize(20);
+  doc.text(agency.name.toUpperCase(), 64, 18, { maxWidth: titleRight - 64 });
+  doc.setFontSize(15);
+  doc.text((agency.tagline || "TOURS & TRAVELS").toUpperCase(), 64, 27);
+
+  // Optional Logo top-right
+  if (logoDataUrl) {
+    try {
+      doc.addImage(logoDataUrl, 174, 8, 26, 20, undefined, "FAST");
+    } catch {
+      // ignore invalid image
+    }
+  }
 
   // Contact Details
   doc.setFont("helvetica", "normal");
@@ -166,9 +205,11 @@ export function generateLetterheadPDF(letter, branding) {
   doc.setTextColor(20, 20, 22);
   doc.setFont("times", "bold");
   doc.setFontSize(13);
-  doc.text("sign", 18, 255);
+  const sigText = agency.sign_label || "sign";
+  doc.text(sigText, 18, 255);
+  const sigWidth = doc.getTextWidth(sigText);
   doc.setLineWidth(0.7);
-  doc.line(30, 256, 68, 256);
+  doc.line(20 + sigWidth, 256, 62 + sigWidth, 256);
 
   // Bottom accent bar with dark geometric right blocks
   doc.setFillColor(r, g, b);
@@ -184,12 +225,13 @@ export function generateLetterheadPDF(letter, branding) {
 }
 
 // 2. VEHICLES QUOTATION PDF (Matches PDF 2)
-export function generateVehiclesQuotationPDF(q, branding) {
+export async function generateVehiclesQuotationPDF(q, branding) {
   const doc = new jsPDF();
   const agency = getAgencyInfo(branding);
   const [r, g, b] = agency.accentRgb;
+  const logoDataUrl = await loadLogoDataUrl(agency.logo_url);
 
-  drawDocChrome(doc, "VEHICLES", "QUOTATION", agency);
+  drawDocChrome(doc, "VEHICLES", "QUOTATION", agency, logoDataUrl);
 
   // Quotation To (Left) & From (Right)
   doc.setFont("helvetica", "bold");
@@ -259,12 +301,13 @@ export function generateVehiclesQuotationPDF(q, branding) {
 }
 
 // 3. VEHICLES INVOICE PDF — Client Invoice & Owner/Settlement Invoice (Matches PDF 3, 4 & 5)
-export function generateVehiclesInvoicePDF(inv, branding) {
+export async function generateVehiclesInvoicePDF(inv, branding) {
   const doc = new jsPDF();
   const agency = getAgencyInfo(branding);
   const [r, g, b] = agency.accentRgb;
+  const logoDataUrl = await loadLogoDataUrl(agency.logo_url);
 
-  drawDocChrome(doc, "VEHICLES", "INVOICE", agency);
+  drawDocChrome(doc, "VEHICLES", "INVOICE", agency, logoDataUrl);
 
   // Invoice To (Left) & From (Right)
   doc.setFont("helvetica", "bold");
