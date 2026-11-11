@@ -739,7 +739,7 @@ export default function SuperAdminDashboard({ userRole, setUserRole }) {
                   {[
                     { flag: "dashboard", label: "Dashboard Hub", desc: "Main KPIs, fleet alerts and live overview" },
                     { flag: "fleet", label: "Fleet & Chassis Management", desc: "Vehicles, chassis numbers, odometer & docs" },
-                    { flag: "customers", label: "Customers & KYC / Guarantor", desc: "Client profiles, cheque, passport & guarantor details" },
+                    { flag: "customers", label: "Customers & KYC / Guarantors", desc: "Client profiles, cheque, passport & 2 guarantors details" },
                     { flag: "leads", label: "Leads CRM", desc: "Prospects pipeline, follow-ups & conversion" },
                     { flag: "quotations", label: "Invoice Quotations", desc: "PDF price estimates and client quotes" },
                     { flag: "bookings", label: "Bookings Scheduler", desc: "Reservations, contracts & billing" },

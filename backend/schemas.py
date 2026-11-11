@@ -77,6 +77,10 @@ class CustomerBase(BaseModel):
     guarantor_phone: Optional[str] = None
     guarantor_cnic: Optional[str] = None
     guarantor_address: Optional[str] = None
+    guarantor2_name: Optional[str] = None
+    guarantor2_phone: Optional[str] = None
+    guarantor2_cnic: Optional[str] = None
+    guarantor2_address: Optional[str] = None
     guarantee_details: Optional[str] = None
 
     @field_validator('cnic_number')
@@ -107,6 +111,10 @@ class CustomerUpdate(BaseModel):
     guarantor_phone: Optional[str] = None
     guarantor_cnic: Optional[str] = None
     guarantor_address: Optional[str] = None
+    guarantor2_name: Optional[str] = None
+    guarantor2_phone: Optional[str] = None
+    guarantor2_cnic: Optional[str] = None
+    guarantor2_address: Optional[str] = None
     guarantee_details: Optional[str] = None
 
 class Customer(CustomerBase):

@@ -88,6 +88,10 @@ class Customer(Base):
     guarantor_phone = Column(String, nullable=True)
     guarantor_cnic = Column(String, nullable=True)
     guarantor_address = Column(String, nullable=True)
+    guarantor2_name = Column(String, nullable=True)
+    guarantor2_phone = Column(String, nullable=True)
+    guarantor2_cnic = Column(String, nullable=True)
+    guarantor2_address = Column(String, nullable=True)
     guarantee_details = Column(String, nullable=True)
 
     bookings = relationship("Booking", back_populates="customer")

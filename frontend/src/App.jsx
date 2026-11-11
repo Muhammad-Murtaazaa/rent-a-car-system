@@ -2154,7 +2154,9 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
     full_name: "", phone_primary: "", phone_secondary: "", home_address: "",
     cnic_number: "", license_number: "", license_expiry_date: "",
     cheque_number: "", passport_number: "",
-    guarantor_name: "", guarantor_phone: "", guarantor_cnic: "", guarantor_address: "", guarantee_details: ""
+    guarantor_name: "", guarantor_phone: "", guarantor_cnic: "", guarantor_address: "",
+    guarantor2_name: "", guarantor2_phone: "", guarantor2_cnic: "", guarantor2_address: "",
+    guarantee_details: ""
   };
   const [form, setForm] = useState(emptyCustForm);
   const [cnicFrontFile, setCnicFrontFile] = useState(null);
@@ -2188,6 +2190,10 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
         guarantor_phone: editingCustomer.guarantor_phone || "",
         guarantor_cnic: editingCustomer.guarantor_cnic || "",
         guarantor_address: editingCustomer.guarantor_address || "",
+        guarantor2_name: editingCustomer.guarantor2_name || "",
+        guarantor2_phone: editingCustomer.guarantor2_phone || "",
+        guarantor2_cnic: editingCustomer.guarantor2_cnic || "",
+        guarantor2_address: editingCustomer.guarantor2_address || "",
         guarantee_details: editingCustomer.guarantee_details || ""
       });
     } else {
@@ -2230,6 +2236,10 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
     formData.append("guarantor_phone", form.guarantor_phone || "");
     formData.append("guarantor_cnic", form.guarantor_cnic || "");
     formData.append("guarantor_address", form.guarantor_address || "");
+    formData.append("guarantor2_name", form.guarantor2_name || "");
+    formData.append("guarantor2_phone", form.guarantor2_phone || "");
+    formData.append("guarantor2_cnic", form.guarantor2_cnic || "");
+    formData.append("guarantor2_address", form.guarantor2_address || "");
     formData.append("guarantee_details", form.guarantee_details || "");
     
     if (cnicFrontFile) formData.append("cnic_front", cnicFrontFile);
@@ -2268,7 +2278,11 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
     c.cnic_number.includes(search) ||
     (c.phone_primary || "").includes(search) ||
     (c.passport_number || "").toLowerCase().includes(search.toLowerCase()) ||
-    (c.cheque_number || "").toLowerCase().includes(search.toLowerCase())
+    (c.cheque_number || "").toLowerCase().includes(search.toLowerCase()) ||
+    (c.guarantor_name || "").toLowerCase().includes(search.toLowerCase()) ||
+    (c.guarantor2_name || "").toLowerCase().includes(search.toLowerCase()) ||
+    (c.guarantor_cnic || "").includes(search) ||
+    (c.guarantor2_cnic || "").includes(search)
   );
 
   return (
@@ -2328,8 +2342,9 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
                 </td>
                 <td className="p-4 text-xs">
                   {cust.cheque_number && <div className="font-mono text-amber-500 font-bold">Chq: {cust.cheque_number}</div>}
-                  {cust.guarantor_name && <div className="text-[10px] text-[var(--text-muted)]">Guarantor: {cust.guarantor_name} ({cust.guarantor_phone || ""})</div>}
-                  {!cust.cheque_number && !cust.guarantor_name && <span className="text-[var(--text-muted)] italic text-[11px]">None</span>}
+                  {cust.guarantor_name && <div className="text-[10px] text-[var(--text-muted)]">G1: {cust.guarantor_name}{cust.guarantor_phone ? ` (${cust.guarantor_phone})` : ""}</div>}
+                  {cust.guarantor2_name && <div className="text-[10px] text-[var(--text-muted)]">G2: {cust.guarantor2_name}{cust.guarantor2_phone ? ` (${cust.guarantor2_phone})` : ""}</div>}
+                  {!cust.cheque_number && !cust.guarantor_name && !cust.guarantor2_name && <span className="text-[var(--text-muted)] italic text-[11px]">None</span>}
                 </td>
                 <td className="p-4 text-xs font-mono">
                   {cust.license_expiry_date ? String(cust.license_expiry_date).slice(0, 10) : <span className="italic text-[var(--text-muted)]">Not set</span>}
@@ -2397,6 +2412,8 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
               <p><span className="text-[var(--text-muted)]">Contact:</span> <span className="text-[var(--text-main)]">{cust.phone_primary}</span></p>
               <p><span className="text-[var(--text-muted)]">License:</span> <span className="text-[var(--text-main)]">{cust.license_number}</span></p>
               <p><span className="text-[var(--text-muted)]">License Expiry:</span> <span className="text-[var(--text-main)]">{cust.license_expiry_date ? String(cust.license_expiry_date).slice(0, 10) : "Not set"}</span></p>
+              {cust.guarantor_name && <p><span className="text-[var(--text-muted)]">Guarantor 1:</span> <span className="text-[var(--text-main)]">{cust.guarantor_name}{cust.guarantor_phone ? ` (${cust.guarantor_phone})` : ""}</span></p>}
+              {cust.guarantor2_name && <p><span className="text-[var(--text-muted)]">Guarantor 2:</span> <span className="text-[var(--text-main)]">{cust.guarantor2_name}{cust.guarantor2_phone ? ` (${cust.guarantor2_phone})` : ""}</span></p>}
             </div>
             <div className="pt-2.5 border-t border-[var(--border-color)] flex flex-wrap gap-2">
               {cust.cnic_front_path && (
@@ -2521,24 +2538,50 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
                     <input type="text" placeholder="e.g. AB1234567" value={form.passport_number} onChange={(e) => setForm({...form, passport_number: e.target.value})} className="w-full app-input rounded-lg p-2 font-mono" />
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Guarantor Name</label>
-                    <input type="text" placeholder="Full Name" value={form.guarantor_name} onChange={(e) => setForm({...form, guarantor_name: e.target.value})} className="w-full app-input rounded-lg p-2" />
+                <div className="p-3 rounded-xl border border-[var(--border-color)] bg-[var(--bg-app)]/50 space-y-2.5">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Guarantor 1</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Guarantor 1 Name</label>
+                      <input type="text" placeholder="Full Name" value={form.guarantor_name} onChange={(e) => setForm({...form, guarantor_name: e.target.value})} className="w-full app-input rounded-lg p-2" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Guarantor 1 Phone</label>
+                      <input type="text" placeholder="03001234567" value={form.guarantor_phone} onChange={(e) => setForm({...form, guarantor_phone: e.target.value})} className="w-full app-input rounded-lg p-2" />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Guarantor Phone</label>
-                    <input type="text" placeholder="03001234567" value={form.guarantor_phone} onChange={(e) => setForm({...form, guarantor_phone: e.target.value})} className="w-full app-input rounded-lg p-2" />
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Guarantor 1 CNIC</label>
+                      <input type="text" placeholder="35201xxxxxxx" value={form.guarantor_cnic} onChange={(e) => setForm({...form, guarantor_cnic: e.target.value})} className="w-full app-input rounded-lg p-2 font-mono" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Guarantor 1 Address</label>
+                      <input type="text" placeholder="Address" value={form.guarantor_address} onChange={(e) => setForm({...form, guarantor_address: e.target.value})} className="w-full app-input rounded-lg p-2" />
+                    </div>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Guarantor CNIC</label>
-                    <input type="text" placeholder="35201xxxxxxx" value={form.guarantor_cnic} onChange={(e) => setForm({...form, guarantor_cnic: e.target.value})} className="w-full app-input rounded-lg p-2 font-mono" />
+                <div className="p-3 rounded-xl border border-[var(--border-color)] bg-[var(--bg-app)]/50 space-y-2.5">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Guarantor 2</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Guarantor 2 Name</label>
+                      <input type="text" placeholder="Full Name" value={form.guarantor2_name} onChange={(e) => setForm({...form, guarantor2_name: e.target.value})} className="w-full app-input rounded-lg p-2" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Guarantor 2 Phone</label>
+                      <input type="text" placeholder="03001234567" value={form.guarantor2_phone} onChange={(e) => setForm({...form, guarantor2_phone: e.target.value})} className="w-full app-input rounded-lg p-2" />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Guarantor Address</label>
-                    <input type="text" placeholder="Address" value={form.guarantor_address} onChange={(e) => setForm({...form, guarantor_address: e.target.value})} className="w-full app-input rounded-lg p-2" />
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Guarantor 2 CNIC</label>
+                      <input type="text" placeholder="35201xxxxxxx" value={form.guarantor2_cnic} onChange={(e) => setForm({...form, guarantor2_cnic: e.target.value})} className="w-full app-input rounded-lg p-2 font-mono" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Guarantor 2 Address</label>
+                      <input type="text" placeholder="Address" value={form.guarantor2_address} onChange={(e) => setForm({...form, guarantor2_address: e.target.value})} className="w-full app-input rounded-lg p-2" />
+                    </div>
                   </div>
                 </div>
                 <div>
@@ -2619,6 +2662,12 @@ function generateRentalContract(booking, brandingName = "Rent A Car Management S
 
   doc.setTextColor(30, 30, 30);
   let y = 48;
+  const ensureSpace = (needed = 12) => {
+    if (y + needed > 282) {
+      doc.addPage();
+      y = 20;
+    }
+  };
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
   doc.text("1. PARTIES", 15, y);
@@ -2630,7 +2679,33 @@ function generateRentalContract(booking, brandingName = "Rent A Car Management S
   doc.text(`CNIC: ${booking.customer?.cnic_number || "N/A"}`, 15, y); y += 6;
   doc.text(`Phone: ${booking.customer?.phone_primary || "N/A"}`, 15, y); y += 6;
   doc.text(`Address: ${booking.customer?.home_address || "N/A"}`, 15, y); y += 6;
-  doc.text(`License #: ${booking.customer?.license_number || "N/A"}`, 15, y); y += 10;
+  doc.text(`License #: ${booking.customer?.license_number || "N/A"}`, 15, y); y += 6;
+  if (booking.customer?.guarantor_name || booking.customer?.guarantor_cnic || booking.customer?.guarantor_phone) {
+    ensureSpace(12);
+    doc.text(
+      `Guarantor 1: ${booking.customer?.guarantor_name || "N/A"}  |  CNIC: ${booking.customer?.guarantor_cnic || "N/A"}  |  Phone: ${booking.customer?.guarantor_phone || "N/A"}`,
+      15, y, { maxWidth: 180 }
+    );
+    y += 6;
+    if (booking.customer?.guarantor_address) {
+      doc.text(`Guarantor 1 Address: ${booking.customer.guarantor_address}`, 15, y, { maxWidth: 180 });
+      y += 6;
+    }
+  }
+  if (booking.customer?.guarantor2_name || booking.customer?.guarantor2_cnic || booking.customer?.guarantor2_phone) {
+    ensureSpace(12);
+    doc.text(
+      `Guarantor 2: ${booking.customer?.guarantor2_name || "N/A"}  |  CNIC: ${booking.customer?.guarantor2_cnic || "N/A"}  |  Phone: ${booking.customer?.guarantor2_phone || "N/A"}`,
+      15, y, { maxWidth: 180 }
+    );
+    y += 6;
+    if (booking.customer?.guarantor2_address) {
+      doc.text(`Guarantor 2 Address: ${booking.customer.guarantor2_address}`, 15, y, { maxWidth: 180 });
+      y += 6;
+    }
+  }
+  y += 4;
+  ensureSpace(24);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
   doc.text("2. VEHICLE(S)", 15, y); y += 8;
@@ -2638,6 +2713,7 @@ function generateRentalContract(booking, brandingName = "Rent A Car Management S
   doc.setFontSize(10);
   if (booking.booked_cars && booking.booked_cars.length > 0) {
     booking.booked_cars.forEach(bc => {
+      ensureSpace(8);
       doc.text(`Make/Model: ${bc.car?.make_model || bc.make_model || "N/A"}  |  Plate: ${bc.car?.plate_number || bc.plate_number || "N/A"}  |  Color: ${bc.car?.color || "N/A"}`, 15, y);
       y += 6;
     });
@@ -2647,6 +2723,7 @@ function generateRentalContract(booking, brandingName = "Rent A Car Management S
     doc.text(`Plate: ${booking.car?.plate_number || "N/A"}  |  Color: ${booking.car?.color || "N/A"}  |  Year: ${booking.car?.model_year || "N/A"}`, 15, y); y += 10;
   }
 
+  ensureSpace(24);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
   doc.text("3. RENTAL PERIOD & CHARGES", 15, y); y += 8;
@@ -2657,6 +2734,7 @@ function generateRentalContract(booking, brandingName = "Rent A Car Management S
   
   if (booking.booked_cars && booking.booked_cars.length > 0) {
     booking.booked_cars.forEach(bc => {
+      ensureSpace(8);
       doc.text(`Rate [${bc.car?.make_model || bc.make_model} (${bc.car?.plate_number || bc.plate_number})]: PKR ${Number(bc.daily_rate || 0).toLocaleString()}/day`, 15, y);
       y += 6;
     });
@@ -2665,6 +2743,7 @@ function generateRentalContract(booking, brandingName = "Rent A Car Management S
     doc.text(`Daily Rate: PKR ${Number(booking.daily_rate || 0).toLocaleString()}  |  Days: ${charges.days}`, 15, y); y += 6;
   }
   
+  ensureSpace(24);
   doc.text(`Estimated Rent: PKR ${charges.rent.toLocaleString()}`, 15, y); y += 6;
   if (booking.is_chauffeur_driven) {
     doc.text(`Chauffeur Wage: PKR ${charges.chauffeur.toLocaleString()} (${booking.chauffeur_daily_wage}/day)`, 15, y); y += 6;
@@ -2672,6 +2751,7 @@ function generateRentalContract(booking, brandingName = "Rent A Car Management S
   doc.text(`Estimated Total: PKR ${charges.total.toLocaleString()}`, 15, y); y += 6;
   doc.text(`Security Deposit: PKR ${Number(booking.security_deposit_amount || 0).toLocaleString()} (${booking.security_deposit_type}) — ${booking.security_deposit_status}`, 15, y); y += 10;
 
+  ensureSpace(24);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
   doc.text("4. TERMS & CONDITIONS", 15, y); y += 8;
@@ -2687,11 +2767,13 @@ function generateRentalContract(booking, brandingName = "Rent A Car Management S
     "This agreement is governed by applicable laws of Pakistan."
   ];
   terms.forEach((t, i) => {
+    ensureSpace(8);
     doc.text(`${i + 1}. ${t}`, 15, y, { maxWidth: 180 });
     y += 7;
   });
   y += 8;
 
+  ensureSpace(58);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
   doc.text("5. SIGNATURES", 15, y); y += 16;
@@ -2702,6 +2784,12 @@ function generateRentalContract(booking, brandingName = "Rent A Car Management S
   y += 5;
   doc.text("Lessor / Company Stamp", 15, y);
   doc.text("Lessee Signature", 120, y);
+  y += 16;
+  doc.line(15, y, 90, y);
+  doc.line(120, y, 195, y);
+  y += 5;
+  doc.text("Guarantor 1 Signature", 15, y);
+  doc.text("Guarantor 2 Signature", 120, y);
   y += 8;
   doc.setFontSize(8);
   doc.setTextColor(100, 100, 100);
@@ -3765,6 +3853,12 @@ function BookingsView({
                   <p className="font-bold text-[var(--text-main)]">{selectedBooking.customer?.full_name || "—"}</p>
                   <p className="text-xs text-[var(--text-muted)] font-mono mt-0.5">{selectedBooking.customer?.cnic_number}</p>
                   <p className="text-xs text-[var(--text-muted)]">{selectedBooking.customer?.phone_primary}</p>
+                  {selectedBooking.customer?.guarantor_name && (
+                    <p className="text-[10px] text-[var(--text-muted)] mt-1">G1: {selectedBooking.customer.guarantor_name}{selectedBooking.customer.guarantor_phone ? ` (${selectedBooking.customer.guarantor_phone})` : ""}</p>
+                  )}
+                  {selectedBooking.customer?.guarantor2_name && (
+                    <p className="text-[10px] text-[var(--text-muted)]">G2: {selectedBooking.customer.guarantor2_name}{selectedBooking.customer.guarantor2_phone ? ` (${selectedBooking.customer.guarantor2_phone})` : ""}</p>
+                  )}
                 </div>
                 <div className="bg-[var(--bg-app)] border border-[var(--border-color)] rounded-xl p-3">
                   <p className="text-[10px] uppercase font-bold text-[var(--text-muted)] mb-1">

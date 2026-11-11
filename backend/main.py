@@ -30,8 +30,8 @@ models.Base.metadata.create_all(bind=engine)
 
 # ponytail: SQLite has no Alembic â€” add missing columns on boot. Switch to migrations if schema churn grows.
 def ensure_sqlite_columns():
-    if not str(engine.url).startswith("sqlite"):
-        return
+    from sqlalchemy import inspect
+    is_sqlite = str(engine.url).startswith("sqlite")
     needed = {
         "cars": [
             ("chassis_number", "VARCHAR"),
@@ -54,6 +54,10 @@ def ensure_sqlite_columns():
             ("guarantor_phone", "VARCHAR"),
             ("guarantor_cnic", "VARCHAR"),
             ("guarantor_address", "VARCHAR"),
+            ("guarantor2_name", "VARCHAR"),
+            ("guarantor2_phone", "VARCHAR"),
+            ("guarantor2_cnic", "VARCHAR"),
+            ("guarantor2_address", "VARCHAR"),
             ("guarantee_details", "VARCHAR"),
         ],
         "bookings": [
@@ -78,31 +82,36 @@ def ensure_sqlite_columns():
             ("items", "JSON"),
         ],
     }
+    inspector = inspect(engine)
     with engine.begin() as conn:
         for table, columns in needed.items():
-            existing = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})")).fetchall()}
+            if not inspector.has_table(table):
+                continue
+            existing = {c["name"] for c in inspector.get_columns(table)}
             for col, typ in columns:
                 if col not in existing:
-                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {typ}"))
-        
-        # Create booked_cars table if it does not exist
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS booked_cars (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id VARCHAR NOT NULL,
-                booking_id INTEGER NOT NULL,
-                car_id INTEGER NOT NULL,
-                daily_rate FLOAT NOT NULL,
-                start_odometer INTEGER DEFAULT 0,
-                return_odometer INTEGER DEFAULT 0,
-                fuel_level_on_start VARCHAR DEFAULT 'Full',
-                fuel_level_on_return VARCHAR DEFAULT 'Full',
-                extra_fuel_charge FLOAT DEFAULT 0.0,
-                structural_damage_charge FLOAT DEFAULT 0.0,
-                FOREIGN KEY (booking_id) REFERENCES bookings (id),
-                FOREIGN KEY (car_id) REFERENCES cars (id)
-            )
-        """))
+                    col_typ = typ if is_sqlite else typ.replace("DATETIME", "TIMESTAMP")
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_typ}"))
+
+        if is_sqlite:
+            # Create booked_cars table if it does not exist
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS booked_cars (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tenant_id VARCHAR NOT NULL,
+                    booking_id INTEGER NOT NULL,
+                    car_id INTEGER NOT NULL,
+                    daily_rate FLOAT NOT NULL,
+                    start_odometer INTEGER DEFAULT 0,
+                    return_odometer INTEGER DEFAULT 0,
+                    fuel_level_on_start VARCHAR DEFAULT 'Full',
+                    fuel_level_on_return VARCHAR DEFAULT 'Full',
+                    extra_fuel_charge FLOAT DEFAULT 0.0,
+                    structural_damage_charge FLOAT DEFAULT 0.0,
+                    FOREIGN KEY (booking_id) REFERENCES bookings (id),
+                    FOREIGN KEY (car_id) REFERENCES cars (id)
+                )
+            """))
 
 ensure_sqlite_columns()
 
@@ -652,6 +661,10 @@ def create_customer(
     guarantor_phone: Optional[str] = Form(None),
     guarantor_cnic: Optional[str] = Form(None),
     guarantor_address: Optional[str] = Form(None),
+    guarantor2_name: Optional[str] = Form(None),
+    guarantor2_phone: Optional[str] = Form(None),
+    guarantor2_cnic: Optional[str] = Form(None),
+    guarantor2_address: Optional[str] = Form(None),
     guarantee_details: Optional[str] = Form(None),
     cnic_front: Optional[UploadFile] = File(None),
     cnic_back: Optional[UploadFile] = File(None),
@@ -694,6 +707,10 @@ def create_customer(
         guarantor_phone=guarantor_phone or None,
         guarantor_cnic=guarantor_cnic or None,
         guarantor_address=guarantor_address or None,
+        guarantor2_name=guarantor2_name or None,
+        guarantor2_phone=guarantor2_phone or None,
+        guarantor2_cnic=guarantor2_cnic or None,
+        guarantor2_address=guarantor2_address or None,
         guarantee_details=guarantee_details or None,
     )
     return crud.create_customer(db=db, customer=customer_schema, tenant_id=tenant_id)
@@ -714,6 +731,10 @@ def update_customer(
     guarantor_phone: Optional[str] = Form(None),
     guarantor_cnic: Optional[str] = Form(None),
     guarantor_address: Optional[str] = Form(None),
+    guarantor2_name: Optional[str] = Form(None),
+    guarantor2_phone: Optional[str] = Form(None),
+    guarantor2_cnic: Optional[str] = Form(None),
+    guarantor2_address: Optional[str] = Form(None),
     guarantee_details: Optional[str] = Form(None),
     cnic_front: Optional[UploadFile] = File(None),
     cnic_back: Optional[UploadFile] = File(None),
@@ -744,6 +765,10 @@ def update_customer(
         "guarantor_phone": guarantor_phone or None,
         "guarantor_cnic": guarantor_cnic or None,
         "guarantor_address": guarantor_address or None,
+        "guarantor2_name": guarantor2_name or None,
+        "guarantor2_phone": guarantor2_phone or None,
+        "guarantor2_cnic": guarantor2_cnic or None,
+        "guarantor2_address": guarantor2_address or None,
         "guarantee_details": guarantee_details or None,
     }
     if license_expiry_date:
