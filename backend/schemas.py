@@ -136,6 +136,10 @@ class BookedCarBase(BaseModel):
     fuel_level_on_return: Optional[str] = "Full"
     extra_fuel_charge: Optional[float] = 0.0
     structural_damage_charge: Optional[float] = 0.0
+    car_wash_charge: Optional[float] = 0.0
+    overtime_charge: Optional[float] = 0.0
+    was_given_washed: Optional[bool] = True
+    is_returned_unwashed: Optional[bool] = False
 
 class BookedCarCreate(BookedCarBase):
     pass
@@ -169,6 +173,8 @@ class BookingBase(BaseModel):
     driver_cnic: Optional[str] = None
     billable_days: Optional[int] = None
     specific_days_notes: Optional[str] = None
+    late_penalty_charge: Optional[float] = 0.0
+    car_wash_charge: Optional[float] = 0.0
 
 class BookingCreate(BookingBase):
     booked_cars: Optional[List[BookedCarCreate]] = None
@@ -194,6 +200,8 @@ class BookingUpdate(BaseModel):
     driver_cnic: Optional[str] = None
     billable_days: Optional[int] = None
     specific_days_notes: Optional[str] = None
+    late_penalty_charge: Optional[float] = None
+    car_wash_charge: Optional[float] = None
     booked_cars: Optional[List[BookedCarCreate]] = None
 
 class Booking(BookingBase):

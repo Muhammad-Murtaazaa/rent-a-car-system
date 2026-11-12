@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { 
   Car, Users, Calendar, ShieldAlert, Wrench, Wallet, Plus, 
-  Search, Trash2, Edit2, AlertTriangle, CheckCircle, Check, MessageSquare, FileText, Send, X, Clock, PenTool, TrendingUp, DollarSign, Sun, Moon, Briefcase, Menu, Eye, BarChart3, Download, Printer, PieChart, LineChart, UserPlus, Receipt, BadgeCheck, ClipboardList, ScrollText, Settings as SettingsIcon, Wifi, WifiOff, RefreshCw, Smartphone, Handshake
+  Search, Trash2, Edit2, AlertTriangle, CheckCircle, Check, MessageSquare, FileText, Send, X, Clock, PenTool, TrendingUp, DollarSign, Sun, Moon, Briefcase, Menu, Eye, BarChart3, Download, Printer, PieChart, LineChart, UserPlus, Receipt, BadgeCheck, ClipboardList, ScrollText, Settings as SettingsIcon, Wifi, WifiOff, RefreshCw, Smartphone, Handshake, Sparkles
 } from "lucide-react";
 import CarHistoryModal from "./CarHistoryModal";
 import SuperAdminDashboard from "./SuperAdminDashboard";
@@ -2853,7 +2853,7 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
 // 4. BOOKINGS & TIMELINE COMPONENT
 // ==========================================
 function estimateBookingCharges(b) {
-  if (!b) return { days: 0, rent: 0, chauffeur: 0, total: 0 };
+  if (!b) return { days: 0, rent: 0, chauffeur: 0, latePenalty: 0, carWash: 0, extraFuel: 0, damages: 0, total: 0 };
   const start = new Date(b.start_datetime);
   const end = new Date(b.expected_end_datetime);
   const rawDays = Math.max(1, Math.ceil(Math.abs(end - start) / (1000 * 60 * 60 * 24)));
@@ -2862,7 +2862,12 @@ function estimateBookingCharges(b) {
     : rawDays;
   const rent = days * (b.daily_rate || 0);
   const chauffeur = b.is_chauffeur_driven ? days * (b.chauffeur_daily_wage || 0) : 0;
-  return { days, rent, chauffeur, total: rent + chauffeur, rawDays };
+  const latePenalty = b.late_penalty_charge || 0;
+  const carWash = b.car_wash_charge || 0;
+  const extraFuel = (b.booked_cars || []).reduce((s, c) => s + (c.extra_fuel_charge || 0), 0);
+  const damages = (b.booked_cars || []).reduce((s, c) => s + (c.structural_damage_charge || 0), 0);
+  const total = rent + chauffeur + latePenalty + carWash + extraFuel + damages;
+  return { days, rent, chauffeur, latePenalty, carWash, extraFuel, damages, total, rawDays };
 }
 
 function generateRentalContract(booking, brandingName = "Rent A Car Management System") {
@@ -3081,7 +3086,8 @@ function BookingsView({
 
   const [returnForm, setReturnForm] = useState({
     actual_return_datetime: "", return_odometer: 0, fuel_level: "Full",
-    extra_fuel_charge: 0, structural_damage_charge: 0, notes: ""
+    extra_fuel_charge: 0, structural_damage_charge: 0, notes: "",
+    custom_late_penalty: "", late_penalty_waived: false, car_wash_charge: 0
   });
 
   const [customerLookupCnic, setCustomerLookupCnic] = useState("");
@@ -3194,6 +3200,12 @@ function BookingsView({
 
   useEffect(() => {
     if (showReturnModal && selectedBooking) {
+      const expectedEnd = new Date(selectedBooking.expected_end_datetime);
+      const now = new Date();
+      const autoHours = now > expectedEnd ? Math.round(((now - expectedEnd) / (1000 * 60 * 60)) * 10) / 10 : 0;
+      const hourlyRate = (selectedBooking.daily_rate || 3000) / 24;
+      const initialOvertimeFee = autoHours > 0 ? Math.round(autoHours * hourlyRate * 1.5) : 0;
+
       const initCars = (selectedBooking.booked_cars && selectedBooking.booked_cars.length > 0)
         ? selectedBooking.booked_cars.map(bc => ({
             car_id: bc.car_id,
@@ -3204,7 +3216,10 @@ function BookingsView({
             fuel_level: bc.fuel_level_on_return || "Full",
             extra_fuel_charge: bc.extra_fuel_charge || 0,
             structural_damage_charge: bc.structural_damage_charge || 0,
-            daily_rate: bc.daily_rate || 0
+            daily_rate: bc.daily_rate || 0,
+            was_given_washed: bc.was_given_washed ?? true,
+            is_returned_unwashed: false,
+            car_wash_charge: 0
           }))
         : [{
             car_id: selectedBooking.car_id,
@@ -3215,12 +3230,18 @@ function BookingsView({
             fuel_level: "Full",
             extra_fuel_charge: 0,
             structural_damage_charge: 0,
-            daily_rate: selectedBooking.daily_rate || 0
+            daily_rate: selectedBooking.daily_rate || 0,
+            was_given_washed: true,
+            is_returned_unwashed: false,
+            car_wash_charge: 0
           }];
 
       setReturnForm({
         actual_return_datetime: new Date().toISOString().slice(0, 16),
         notes: "",
+        custom_late_penalty: initialOvertimeFee > 0 ? String(initialOvertimeFee) : "",
+        late_penalty_waived: false,
+        car_wash_charge: 0,
         booked_cars: initCars
       });
     }
@@ -3333,8 +3354,8 @@ function BookingsView({
   const calculateInvoice = () => {
     if (!selectedBooking) {
       return {
-        baseDays: 0, baseFare: 0, driverWage: 0, lateHours: 0, latePenalty: 0,
-        extraFuel: 0, damages: 0, totalBill: 0, paidSoFar: 0, deposit: 0,
+        baseDays: 0, baseFare: 0, driverWage: 0, lateHours: 0, autoLatePenalty: 0, latePenalty: 0,
+        extraFuel: 0, damages: 0, carWashFee: 0, totalBill: 0, paidSoFar: 0, deposit: 0,
         remainingAfterPayments: 0, cashToCollect: 0, depositApplied: 0, balanceDue: 0,
       };
     }
@@ -3356,12 +3377,19 @@ function BookingsView({
     }
 
     let lateHours = 0;
-    let latePenalty = 0;
+    let autoLatePenalty = 0;
     if (actualEnd > expectedEnd) {
       const lateDiffTime = actualEnd - expectedEnd;
-      lateHours = lateDiffTime / (1000 * 60 * 60); 
+      lateHours = Math.round((lateDiffTime / (1000 * 60 * 60)) * 10) / 10; 
       const hourlyRate = selectedBooking.daily_rate / 24;
-      latePenalty = Math.round(lateHours * hourlyRate * 1.5);
+      autoLatePenalty = Math.round(lateHours * hourlyRate * 1.5);
+    }
+
+    let latePenalty = autoLatePenalty;
+    if (returnForm.late_penalty_waived) {
+      latePenalty = 0;
+    } else if (returnForm.custom_late_penalty !== undefined && returnForm.custom_late_penalty !== "") {
+      latePenalty = parseFloat(returnForm.custom_late_penalty) || 0;
     }
 
     const extraFuel = returnForm.booked_cars 
@@ -3372,7 +3400,11 @@ function BookingsView({
       ? returnForm.booked_cars.reduce((s, c) => s + (parseFloat(c.structural_damage_charge) || 0), 0)
       : (parseFloat(returnForm.structural_damage_charge) || 0);
 
-    const totalBill = baseFare + driverWage + latePenalty + extraFuel + damages;
+    const carWashFee = returnForm.booked_cars
+      ? returnForm.booked_cars.reduce((s, c) => s + (parseFloat(c.car_wash_charge) || 0), 0)
+      : (parseFloat(returnForm.car_wash_charge) || 0);
+
+    const totalBill = baseFare + driverWage + latePenalty + extraFuel + damages + carWashFee;
     const deposit = selectedBooking.security_deposit_amount || 0;
     const paidSoFar = (financials || [])
       .filter(f => f.booking_id === selectedBooking.id)
@@ -3385,8 +3417,10 @@ function BookingsView({
       baseDays,
       baseFare,
       driverWage,
-      lateHours: Math.round(lateHours * 10) / 10,
+      lateHours,
+      autoLatePenalty,
       latePenalty,
+      carWashFee,
       extraFuel,
       damages,
       totalBill,
@@ -3434,6 +3468,8 @@ function BookingsView({
         status: "Completed",
         actual_return_datetime: returnForm.actual_return_datetime,
         security_deposit_status: depositStatus,
+        late_penalty_charge: invoice.latePenalty,
+        car_wash_charge: invoice.carWashFee,
         booked_cars: returnForm.booked_cars.map(c => ({
           car_id: c.car_id,
           daily_rate: c.daily_rate || 0, // maintain the actual daily rate
@@ -3442,7 +3478,11 @@ function BookingsView({
           fuel_level_on_start: "Full", // maintain
           fuel_level_on_return: c.fuel_level,
           extra_fuel_charge: parseFloat(c.extra_fuel_charge) || 0,
-          structural_damage_charge: parseFloat(c.structural_damage_charge) || 0
+          structural_damage_charge: parseFloat(c.structural_damage_charge) || 0,
+          car_wash_charge: parseFloat(c.car_wash_charge) || 0,
+          overtime_charge: invoice.latePenalty,
+          was_given_washed: c.was_given_washed ?? true,
+          is_returned_unwashed: !!c.is_returned_unwashed
         }))
       })
     });
@@ -3578,8 +3618,9 @@ function BookingsView({
     
     items.push(
       { name: "Chauffeur Wages / Driver Allowances", cost: invoice.driverWage },
-      { name: `Overtime Penalty (${invoice.lateHours} Hours)`, cost: invoice.latePenalty },
+      { name: `Overtime Extra Money (${invoice.lateHours > 0 ? invoice.lateHours + ' Hours' : 'Overtime'})`, cost: invoice.latePenalty },
       { name: "Refueling / Fuel Shortage Surcharge", cost: invoice.extraFuel },
+      { name: "Car Wash / Unwashed Vehicle Cleaning Charge", cost: invoice.carWashFee },
       { name: "Accident / Structural Damage Surcharges", cost: invoice.damages }
     );
     
@@ -3631,7 +3672,10 @@ function BookingsView({
     const text = `Dear ${name}, here are your rental details for vehicle(s) ${plate}:\n` +
                  `- Total Days: ${invoice.baseDays}\n` +
                  `- Base Rent: PKR ${invoice.baseFare}\n` +
-                 `- Overtime Penalty: PKR ${invoice.latePenalty}\n` +
+                 (invoice.latePenalty > 0 ? `- Overtime Extra Charge (${invoice.lateHours > 0 ? invoice.lateHours + 'h' : 'Late'}): PKR ${invoice.latePenalty}\n` : "") +
+                 (invoice.carWashFee > 0 ? `- Car Wash / Cleaning Charge: PKR ${invoice.carWashFee}\n` : "") +
+                 (invoice.extraFuel > 0 ? `- Fuel Refill Surcharge: PKR ${invoice.extraFuel}\n` : "") +
+                 (invoice.damages > 0 ? `- Damage Penalty: PKR ${invoice.damages}\n` : "") +
                  `- Total Bill: PKR ${invoice.totalBill}\n` +
                  `- Balance Due: PKR ${invoice.balanceDue}\n` +
                  `Thank you for choosing Rent A Car Management System!`;
@@ -4958,6 +5002,81 @@ function BookingsView({
                   />
                 </div>
 
+                {/* Overtime / Late Return Extra Money Card */}
+                <div className={`p-3 rounded-xl border transition-all ${invoice.lateHours > 0 ? 'bg-amber-500/10 border-amber-500/30' : 'bg-[var(--bg-app)] border-[var(--border-color)]'} space-y-2`}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Clock className="h-4 w-4 text-amber-500" />
+                      <span className="font-semibold text-xs text-[var(--text-main)]">Overtime / Late Return Extra Money</span>
+                    </div>
+                    {invoice.lateHours > 0 ? (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400">
+                        {invoice.lateHours}h Overdue
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                        On Time
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1">
+                      <div className="relative">
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-[var(--text-muted)]">PKR</span>
+                        <input 
+                          type="number"
+                          placeholder={invoice.autoLatePenalty > 0 ? `Auto: ${invoice.autoLatePenalty}` : "0"}
+                          value={returnForm.late_penalty_waived ? "0" : (returnForm.custom_late_penalty ?? "")}
+                          onChange={(e) => {
+                            setReturnForm(prev => ({
+                              ...prev,
+                              custom_late_penalty: e.target.value,
+                              late_penalty_waived: false
+                            }));
+                          }}
+                          disabled={returnForm.late_penalty_waived}
+                          className="w-full app-input rounded pl-10 pr-2 py-1.5 text-xs font-semibold"
+                        />
+                      </div>
+                    </div>
+                    {invoice.autoLatePenalty > 0 && (
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          setReturnForm(prev => ({
+                            ...prev,
+                            custom_late_penalty: String(invoice.autoLatePenalty),
+                            late_penalty_waived: false
+                          }));
+                        }}
+                        className="px-2.5 py-1.5 text-[10px] font-semibold rounded bg-amber-600 hover:bg-amber-500 text-white transition-all whitespace-nowrap"
+                        title="Reset to standard 1.5x formula"
+                      >
+                        Auto (1.5x)
+                      </button>
+                    )}
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        setReturnForm(prev => ({
+                          ...prev,
+                          late_penalty_waived: !prev.late_penalty_waived,
+                          custom_late_penalty: !prev.late_penalty_waived ? "0" : ""
+                        }));
+                      }}
+                      className={`px-2.5 py-1.5 text-[10px] font-semibold rounded transition-all whitespace-nowrap ${returnForm.late_penalty_waived ? 'bg-emerald-600 text-white' : 'bg-slate-200 dark:bg-slate-800 text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
+                    >
+                      {returnForm.late_penalty_waived ? "Waived" : "Waive (0)"}
+                    </button>
+                  </div>
+                  {invoice.lateHours > 0 && !returnForm.late_penalty_waived && (
+                    <p className="text-[10px] text-[var(--text-muted)]">
+                      Suggested standard fee: {invoice.lateHours}h × ({selectedBooking.daily_rate}/24) × 1.5 = PKR {invoice.autoLatePenalty.toLocaleString()}.
+                    </p>
+                  )}
+                </div>
+
                 <div className="space-y-4 max-h-[350px] overflow-y-auto border border-[var(--border-color)] rounded-xl p-3 bg-[var(--tr-hover)]">
                   {returnForm.booked_cars && returnForm.booked_cars.map((c, index) => (
                     <div key={c.car_id} className="p-3 bg-[var(--bg-app)] border border-[var(--border-color)] rounded-xl space-y-3">
@@ -5034,6 +5153,115 @@ function BookingsView({
                             className="w-full app-input rounded p-1.5 text-xs"
                           />
                         </div>
+                      </div>
+
+                      {/* Car Wash / Unwashed Condition Section */}
+                      <div className="pt-2 border-t border-[var(--border-color)] space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="flex items-center gap-1.5 cursor-pointer select-none text-[11px] font-semibold text-[var(--text-main)]">
+                            <input 
+                              type="checkbox"
+                              checked={!!c.is_returned_unwashed}
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                setReturnForm(prev => ({
+                                  ...prev,
+                                  booked_cars: prev.booked_cars.map((x, idx) => 
+                                    idx === index ? { 
+                                      ...x, 
+                                      is_returned_unwashed: checked,
+                                      car_wash_charge: checked ? (x.car_wash_charge > 0 ? x.car_wash_charge : 1000) : 0 
+                                    } : x
+                                  )
+                                }));
+                              }}
+                              className="rounded border-[var(--border-color)] text-teal-600 focus:ring-teal-500 h-3.5 w-3.5"
+                            />
+                            <span className="flex items-center gap-1">
+                              <Sparkles className="h-3.5 w-3.5 text-cyan-500" />
+                              Returned Unwashed / Dirty
+                            </span>
+                          </label>
+                          <label className="flex items-center gap-1 text-[10px] text-[var(--text-muted)] cursor-pointer">
+                            <input 
+                              type="checkbox"
+                              checked={c.was_given_washed ?? true}
+                              onChange={(e) => {
+                                const val = e.target.checked;
+                                setReturnForm(prev => ({
+                                  ...prev,
+                                  booked_cars: prev.booked_cars.map((x, idx) => 
+                                    idx === index ? { ...x, was_given_washed: val } : x
+                                  )
+                                }));
+                              }}
+                              className="rounded border-[var(--border-color)] text-teal-600 h-3 w-3"
+                            />
+                            Given Washed
+                          </label>
+                        </div>
+
+                        {c.is_returned_unwashed && (
+                          <div className="p-2.5 rounded-lg bg-cyan-500/10 border border-cyan-500/20 space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[10px] font-semibold text-[var(--text-muted)]">Wash / Cleaning Penalty:</span>
+                              <div className="relative flex-1 max-w-[130px]">
+                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[9px] font-bold text-[var(--text-muted)]">PKR</span>
+                                <input 
+                                  type="number"
+                                  value={c.car_wash_charge || 0}
+                                  onChange={(e) => {
+                                    const val = parseFloat(e.target.value) || 0;
+                                    setReturnForm(prev => ({
+                                      ...prev,
+                                      booked_cars: prev.booked_cars.map((x, idx) => idx === index ? { ...x, car_wash_charge: val } : x)
+                                    }));
+                                  }}
+                                  className="w-full app-input rounded pl-8 pr-2 py-1 text-xs text-right font-bold"
+                                />
+                              </div>
+                            </div>
+                            <div className="flex gap-1.5 flex-wrap items-center">
+                              <span className="text-[9px] text-[var(--text-muted)]">Presets:</span>
+                              <button 
+                                type="button"
+                                onClick={() => {
+                                  setReturnForm(prev => ({
+                                    ...prev,
+                                    booked_cars: prev.booked_cars.map((x, idx) => idx === index ? { ...x, car_wash_charge: 800 } : x)
+                                  }));
+                                }}
+                                className="px-2 py-0.5 text-[9px] font-semibold rounded bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30"
+                              >
+                                Basic (800)
+                              </button>
+                              <button 
+                                type="button"
+                                onClick={() => {
+                                  setReturnForm(prev => ({
+                                    ...prev,
+                                    booked_cars: prev.booked_cars.map((x, idx) => idx === index ? { ...x, car_wash_charge: 1500 } : x)
+                                  }));
+                                }}
+                                className="px-2 py-0.5 text-[9px] font-semibold rounded bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30"
+                              >
+                                Full Wash (1,500)
+                              </button>
+                              <button 
+                                type="button"
+                                onClick={() => {
+                                  setReturnForm(prev => ({
+                                    ...prev,
+                                    booked_cars: prev.booked_cars.map((x, idx) => idx === index ? { ...x, car_wash_charge: 2500 } : x)
+                                  }));
+                                }}
+                                className="px-2 py-0.5 text-[9px] font-semibold rounded bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30"
+                              >
+                                Mud / Detail (2,500)
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -5138,10 +5366,16 @@ function BookingsView({
                         <span>PKR {invoice.driverWage?.toLocaleString()}</span>
                       </div>
                     )}
-                    {invoice.lateHours > 0 && (
-                      <div className="flex justify-between text-amber-700 dark:text-amber-400">
-                        <span>Overtime Penalty ({invoice.lateHours} hours @ 1.5x multiplier):</span>
+                    {invoice.latePenalty > 0 && (
+                      <div className="flex justify-between text-amber-500">
+                        <span>Overtime Extra Money ({invoice.lateHours > 0 ? `${invoice.lateHours}h` : 'Manual'}):</span>
                         <span>PKR {invoice.latePenalty?.toLocaleString()}</span>
+                      </div>
+                    )}
+                    {invoice.carWashFee > 0 && (
+                      <div className="flex justify-between text-cyan-400">
+                        <span>Car Wash / Unwashed Vehicle Cleaning:</span>
+                        <span>PKR {invoice.carWashFee?.toLocaleString()}</span>
                       </div>
                     )}
                     {invoice.extraFuel > 0 && (

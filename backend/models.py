@@ -122,6 +122,8 @@ class Booking(Base):
     driver_cnic = Column(String, nullable=True)
     billable_days = Column(Integer, nullable=True)
     specific_days_notes = Column(String, nullable=True)
+    late_penalty_charge = Column(Float, nullable=True, default=0.0)
+    car_wash_charge = Column(Float, nullable=True, default=0.0)
 
     car = relationship("Car", back_populates="bookings")
     customer = relationship("Customer", back_populates="bookings")
@@ -142,6 +144,10 @@ class BookedCar(Base):
     fuel_level_on_return = Column(String, nullable=True, default="Full")
     extra_fuel_charge = Column(Float, nullable=True, default=0.0)
     structural_damage_charge = Column(Float, nullable=True, default=0.0)
+    car_wash_charge = Column(Float, nullable=True, default=0.0)
+    overtime_charge = Column(Float, nullable=True, default=0.0)
+    was_given_washed = Column(Boolean, nullable=True, default=True)
+    is_returned_unwashed = Column(Boolean, nullable=True, default=False)
 
     booking = relationship("Booking", back_populates="booked_cars")
     car = relationship("Car")

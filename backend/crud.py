@@ -274,6 +274,14 @@ def update_booking(db: Session, booking_id: int, booking_update: schemas.Booking
                 db_bc.extra_fuel_charge = bc_up.extra_fuel_charge
                 db_bc.structural_damage_charge = bc_up.structural_damage_charge
                 db_bc.daily_rate = bc_up.daily_rate
+                if hasattr(bc_up, "car_wash_charge") and bc_up.car_wash_charge is not None:
+                    db_bc.car_wash_charge = bc_up.car_wash_charge
+                if hasattr(bc_up, "overtime_charge") and bc_up.overtime_charge is not None:
+                    db_bc.overtime_charge = bc_up.overtime_charge
+                if hasattr(bc_up, "was_given_washed") and bc_up.was_given_washed is not None:
+                    db_bc.was_given_washed = bc_up.was_given_washed
+                if hasattr(bc_up, "is_returned_unwashed") and bc_up.is_returned_unwashed is not None:
+                    db_bc.is_returned_unwashed = bc_up.is_returned_unwashed
 
     # Apply updates to Booking model
     booking_data = booking_update.dict(exclude_unset=True, exclude={"booked_cars"})

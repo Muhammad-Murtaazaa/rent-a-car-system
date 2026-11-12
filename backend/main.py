@@ -71,6 +71,14 @@ def ensure_sqlite_columns():
             ("driver_cnic", "VARCHAR"),
             ("billable_days", "INTEGER"),
             ("specific_days_notes", "VARCHAR"),
+            ("late_penalty_charge", "FLOAT DEFAULT 0.0"),
+            ("car_wash_charge", "FLOAT DEFAULT 0.0"),
+        ],
+        "booked_cars": [
+            ("car_wash_charge", "FLOAT DEFAULT 0.0"),
+            ("overtime_charge", "FLOAT DEFAULT 0.0"),
+            ("was_given_washed", "BOOLEAN DEFAULT 1"),
+            ("is_returned_unwashed", "BOOLEAN DEFAULT 0"),
         ],
         "investors": [
             ("payout_type", "VARCHAR DEFAULT 'percentage'"),

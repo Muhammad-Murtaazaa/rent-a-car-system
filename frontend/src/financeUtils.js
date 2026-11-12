@@ -199,6 +199,14 @@ export function estimatedBookingCharge(booking) {
   if (booking.is_chauffeur_driven) {
     total += days * (Number(booking.chauffeur_daily_wage) || 0);
   }
+  if (booking.late_penalty_charge) total += Number(booking.late_penalty_charge) || 0;
+  if (booking.car_wash_charge) total += Number(booking.car_wash_charge) || 0;
+  if (Array.isArray(booking.booked_cars)) {
+    for (const bc of booking.booked_cars) {
+      if (bc.extra_fuel_charge) total += Number(bc.extra_fuel_charge) || 0;
+      if (bc.structural_damage_charge) total += Number(bc.structural_damage_charge) || 0;
+    }
+  }
   return total;
 }
 
