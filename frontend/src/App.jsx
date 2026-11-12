@@ -499,6 +499,19 @@ export default function App() {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <button 
+            type="button"
+            onClick={() => { setActiveTab("settings"); setMobileMenuOpen(false); }}
+            className={`p-2.5 min-h-[44px] min-w-[44px] rounded-lg border border-[var(--border-color)] transition-colors ${
+              activeTab === "settings"
+                ? "bg-teal-500/20 text-teal-400 border-teal-500/40"
+                : "text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--tr-hover)]"
+            }`}
+            aria-label="Agency Settings & Letterhead"
+            title="Agency Settings & Letterhead"
+          >
+            <SettingsIcon className="h-4 w-4" />
+          </button>
+          <button 
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")} 
             className="p-2.5 min-h-[44px] min-w-[44px] rounded-lg border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--tr-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-color)]"
             aria-label="Toggle theme"
@@ -554,6 +567,19 @@ export default function App() {
               )}
             </div>
             <div className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => { setActiveTab("settings"); setMobileMenuOpen(false); }}
+                className={`hidden md:inline-flex p-2 rounded-lg border border-[var(--border-color)] transition-colors ${
+                  activeTab === "settings"
+                    ? "bg-teal-500/20 text-teal-400 border-teal-500/40"
+                    : "text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--tr-hover)]"
+                }`}
+                aria-label="Agency Settings & Letterhead"
+                title="Agency Settings & Letterhead"
+              >
+                <SettingsIcon className="h-4 w-4" />
+              </button>
               <button 
                 onClick={() => setTheme(theme === "dark" ? "light" : "dark")} 
                 className="hidden md:inline-flex p-2 rounded-lg border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--tr-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-color)]"
@@ -591,7 +617,7 @@ export default function App() {
               { id: "blacklist", label: "Blacklist", icon: AlertTriangle },
               { id: "investors", label: "Investors", icon: Briefcase },
               { id: "shareholders", label: "Shareholders", icon: Wallet },
-              { id: "settings", label: "Settings", icon: SettingsIcon }
+              { id: "settings", label: "Settings & Letterhead", icon: SettingsIcon }
             ].filter(tab => {
               const toggleable = ["dashboard", "fleet", "customers", "leads", "quotations", "bookings", "suppliers", "receipts", "employees", "maintenance", "blacklist"];
               if (toggleable.includes(tab.id) && branding.feature_flags?.length) {
@@ -614,7 +640,27 @@ export default function App() {
           </nav>
         </div>
 
-        <div className="pt-5 mt-4 border-t border-[var(--border-color)] space-y-3">
+        <div className="pt-3 mt-3 border-t border-[var(--border-color)] space-y-2.5">
+          {/* Pinned Quick Access to Settings & Letterhead */}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab("settings");
+              setMobileMenuOpen(false);
+            }}
+            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl border text-xs font-semibold transition-all ${
+              activeTab === "settings"
+                ? "bg-teal-500/20 text-teal-300 border-teal-500/40 shadow-sm"
+                : "border-[var(--border-color)] bg-[var(--bg-app)] text-[var(--text-main)] hover:border-teal-500/40 hover:bg-[var(--tr-hover)]"
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <SettingsIcon className="h-4 w-4 text-teal-400 shrink-0" />
+              <span>Settings & Letterhead</span>
+            </div>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-teal-500/15 text-teal-400 font-bold border border-teal-500/25">Setup</span>
+          </button>
+
           <div className="text-left">
             <label className="block text-[11px] font-medium text-[var(--text-muted)] mb-1.5">Role</label>
             <select
