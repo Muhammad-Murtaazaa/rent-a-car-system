@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { 
   Car, Users, Calendar, ShieldAlert, Wrench, Wallet, Plus, 
-  Search, Trash2, Edit2, AlertTriangle, CheckCircle, FileText, Send, X, Clock, PenTool, TrendingUp, DollarSign, Sun, Moon, Briefcase, Menu, Eye, BarChart3, Download, Printer, PieChart, LineChart, UserPlus, Receipt, BadgeCheck, ClipboardList, ScrollText, Settings as SettingsIcon, Wifi, WifiOff, RefreshCw, Smartphone
+  Search, Trash2, Edit2, AlertTriangle, CheckCircle, Check, MessageSquare, FileText, Send, X, Clock, PenTool, TrendingUp, DollarSign, Sun, Moon, Briefcase, Menu, Eye, BarChart3, Download, Printer, PieChart, LineChart, UserPlus, Receipt, BadgeCheck, ClipboardList, ScrollText, Settings as SettingsIcon, Wifi, WifiOff, RefreshCw, Smartphone, Handshake
 } from "lucide-react";
 import CarHistoryModal from "./CarHistoryModal";
 import SuperAdminDashboard from "./SuperAdminDashboard";
@@ -11,6 +11,7 @@ import QuotationsView from "./QuotationsView";
 import ReceiptsView from "./ReceiptsView";
 import InvoicesLettersView from "./InvoicesLettersView";
 import SettingsView from "./SettingsView";
+import SuppliersView from "./SuppliersView";
 import { syncOfflineQueue, getPendingSyncCount, warmExtraUrls } from "./offlineSync";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter, Button, Badge, Input, GlowButton, GradientCard, ShimmerButton, AnimatedGradientText, MagicCard, BorderBeam, Progress, Separator } from "./shadcn";
 import { jsPDF } from "jspdf";
@@ -74,6 +75,7 @@ export default function App() {
   const [receipts, setReceipts] = useState([]);
   const [vehicleInvoices, setVehicleInvoices] = useState([]);
   const [officialLetters, setOfficialLetters] = useState([]);
+  const [supplierDeals, setSupplierDeals] = useState([]);
   const [prefillQuote, setPrefillQuote] = useState(null);
   const [prefillCustomer, setPrefillCustomer] = useState(null);
 
@@ -116,7 +118,9 @@ export default function App() {
     car_id: "", customer_id: "", start_datetime: "", expected_end_datetime: "",
     daily_rate: 3000, is_chauffeur_driven: false, chauffeur_daily_wage: 1500,
     security_deposit_amount: 10000, security_deposit_type: "Cash", security_deposit_status: "Held",
-    booking_type: "Individual", company_name: "", booked_cars: []
+    booking_type: "Individual", company_name: "", booked_cars: [],
+    driver_type: "Company Driver", driver_name: "", driver_phone: "", driver_cnic: "",
+    billable_days: "", specific_days_notes: ""
   });
 
   // Signature states
@@ -167,7 +171,7 @@ export default function App() {
       const q = "limit=10000";
       const [
         carsRes, custRes, bookingsRes, maintRes, blRes,
-        alertsRes, finRes, invRes, shRes, empRes, leadsRes, quotesRes, rcptRes, vInvRes, ltrRes
+        alertsRes, finRes, invRes, shRes, empRes, leadsRes, quotesRes, rcptRes, vInvRes, ltrRes, suppDealsRes
       ] = await Promise.all([
         fetch(`/api/cars?${q}`),
         fetch(`/api/customers?${q}`),
@@ -184,6 +188,7 @@ export default function App() {
         fetch(`/api/receipts?limit=1000`),
         fetch(`/api/vehicle-invoices?limit=1000`),
         fetch(`/api/letters?limit=1000`),
+        fetch(`/api/supplier-deals?limit=1000`),
       ]);
 
       if (carsRes.ok) {
@@ -207,6 +212,7 @@ export default function App() {
       if (rcptRes.ok) setReceipts(await rcptRes.json());
       if (vInvRes.ok) setVehicleInvoices(await vInvRes.json());
       if (ltrRes.ok) setOfficialLetters(await ltrRes.json());
+      if (suppDealsRes.ok) setSupplierDeals(await suppDealsRes.json());
     } catch (err) {
       console.error("Error loading API data:", err);
     }
@@ -574,6 +580,7 @@ export default function App() {
               { id: "leads", label: "Leads CRM", icon: UserPlus },
               { id: "quotations", label: "Quotations", icon: ClipboardList },
               { id: "bookings", label: "Bookings", icon: Calendar },
+              { id: "suppliers", label: "Suppliers / Sublet", icon: Handshake },
               { id: "invoices-letters", label: "Invoices & Letters", icon: ScrollText },
               { id: "receipts", label: "Receipts", icon: Receipt },
               { id: "employees", label: "Employees", icon: BadgeCheck },
@@ -586,7 +593,7 @@ export default function App() {
               { id: "shareholders", label: "Shareholders", icon: Wallet },
               { id: "settings", label: "Settings", icon: SettingsIcon }
             ].filter(tab => {
-              const toggleable = ["dashboard", "fleet", "customers", "leads", "quotations", "bookings", "receipts", "employees", "maintenance", "blacklist"];
+              const toggleable = ["dashboard", "fleet", "customers", "leads", "quotations", "bookings", "suppliers", "receipts", "employees", "maintenance", "blacklist"];
               if (toggleable.includes(tab.id) && branding.feature_flags?.length) {
                 return branding.feature_flags.includes(tab.id);
               }
@@ -874,6 +881,13 @@ export default function App() {
             setForm={setBookingForm}
             branding={branding}
             financials={financials}
+          />
+        )}
+        {activeTab === "suppliers" && (
+          <SuppliersView
+            supplierDeals={supplierDeals}
+            fetchData={fetchData}
+            branding={branding}
           />
         )}
         {activeTab === "maintenance" && (
@@ -2163,7 +2177,52 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
   const [cnicBackFile, setCnicBackFile] = useState(null);
   const [licenseFrontFile, setLicenseFrontFile] = useState(null);
 
+  // Extra documents & Guarantor PDFs state
+  const [extraDocsList, setExtraDocsList] = useState([]);
+  const [newDocPreset, setNewDocPreset] = useState("Guarantor 1 CNIC / Document");
+  const [docUploadLoading, setDocUploadLoading] = useState(false);
+
   const [blacklistWarning, setBlacklistWarning] = useState("");
+
+  const sendCustomerWhatsApp = (cust) => {
+    const raw = cust.phone_primary || "";
+    const clean = raw.replace(/[^0-9]/g, "");
+    if (!clean) return alert("Customer has no phone number.");
+    const num = clean.startsWith("0") ? "92" + clean.substring(1) : clean;
+    const brand = "Rent A Car Management System";
+    const msg = `*${brand}* - Client Services\nDear ${cust.full_name},\n\nWe are reaching out regarding your account and vehicle rental reservations. Please let us know if you need any assistance!`;
+    window.open(`https://wa.me/${num}?text=${encodeURIComponent(msg)}`, "_blank");
+  };
+
+  const handleAttachExtraDoc = async (file, title) => {
+    if (!file) return;
+    setDocUploadLoading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("title", title || "Guarantor Document");
+      const res = await fetch("/api/customers/upload-document", { method: "POST", body: fd });
+      if (res.ok) {
+        const data = await res.json();
+        setExtraDocsList(prev => [...prev, {
+          title: data.title,
+          file_path: data.file_path,
+          filename: data.filename || file.name,
+          size: file.size
+        }]);
+      } else {
+        alert("Failed to upload document.");
+      }
+    } catch (err) {
+      alert("Upload error: " + err.message);
+    } finally {
+      setDocUploadLoading(false);
+    }
+  };
+
+  const removeExtraDoc = (idx) => {
+    setExtraDocsList(prev => prev.filter((_, i) => i !== idx));
+  };
 
   useEffect(() => {
     if (prefillCustomer) {
@@ -2196,8 +2255,10 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
         guarantor2_address: editingCustomer.guarantor2_address || "",
         guarantee_details: editingCustomer.guarantee_details || ""
       });
+      setExtraDocsList(Array.isArray(editingCustomer.extra_documents) ? editingCustomer.extra_documents : []);
     } else {
       setForm(emptyCustForm);
+      setExtraDocsList([]);
     }
     setCnicFrontFile(null);
     setCnicBackFile(null);
@@ -2241,6 +2302,7 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
     formData.append("guarantor2_cnic", form.guarantor2_cnic || "");
     formData.append("guarantor2_address", form.guarantor2_address || "");
     formData.append("guarantee_details", form.guarantee_details || "");
+    formData.append("extra_documents", JSON.stringify(extraDocsList || []));
     
     if (cnicFrontFile) formData.append("cnic_front", cnicFrontFile);
     if (cnicBackFile) formData.append("cnic_back", cnicBackFile);
@@ -2350,7 +2412,7 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
                   {cust.license_expiry_date ? String(cust.license_expiry_date).slice(0, 10) : <span className="italic text-[var(--text-muted)]">Not set</span>}
                 </td>
                 <td className="p-4">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     {cust.cnic_front_path ? (
                       <a href={cust.cnic_front_path} target="_blank" rel="noreferrer" className="text-xs font-semibold px-2 py-1 rounded bg-teal-500/10 text-teal-700 dark:text-teal-400 border border-teal-500/20">CNIC F</a>
                     ) : <span className="text-slate-600 text-xs italic">No Front</span>}
@@ -2360,10 +2422,30 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
                     {cust.license_front_path ? (
                       <a href={cust.license_front_path} target="_blank" rel="noreferrer" className="text-xs font-semibold px-2 py-1 rounded bg-teal-500/10 text-teal-700 dark:text-teal-400 border border-teal-500/20">Lic</a>
                     ) : null}
+                    {Array.isArray(cust.extra_documents) && cust.extra_documents.map((doc, dIdx) => (
+                      <a 
+                        key={dIdx}
+                        href={doc.file_path} 
+                        target="_blank" 
+                        rel="noreferrer" 
+                        title={`${doc.title || "Document"}: ${doc.filename || "file"}`}
+                        className="text-xs font-bold px-2 py-1 rounded bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border border-indigo-500/20 flex items-center gap-1 hover:bg-indigo-500/20"
+                      >
+                        <FileText className="h-3 w-3" />
+                        <span className="max-w-[70px] truncate">{doc.title ? doc.title.replace("Guarantor ", "G ") : "PDF"}</span>
+                      </a>
+                    ))}
                   </div>
                 </td>
                 <td className="p-4 text-right">
                   <div className="flex items-center justify-end gap-2">
+                    <button 
+                      onClick={() => sendCustomerWhatsApp(cust)}
+                      className="p-2 min-h-[44px] min-w-[44px] rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25 hover:bg-emerald-500/20 flex items-center justify-center transition-colors"
+                      title="Open WhatsApp chat with customer"
+                    >
+                      <MessageSquare className="h-3.5 w-3.5" />
+                    </button>
                     <button 
                       onClick={() => openEdit(cust)}
                       className="p-2 min-h-[44px] min-w-[44px] rounded bg-[var(--bg-app)] border border-[var(--border-color)] text-[var(--accent-color)] hover:border-[var(--accent-color)] flex items-center justify-center"
@@ -2395,6 +2477,13 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
               </div>
               <div className="flex gap-2">
                 <button 
+                  onClick={() => sendCustomerWhatsApp(cust)}
+                  className="p-2 min-h-[44px] min-w-[44px] rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25 flex items-center justify-center"
+                  title="WhatsApp"
+                >
+                  <MessageSquare className="h-3.5 w-3.5" />
+                </button>
+                <button 
                   onClick={() => openEdit(cust)}
                   className="p-2 min-h-[44px] min-w-[44px] rounded bg-[var(--bg-app)] border border-[var(--border-color)] text-[var(--accent-color)] flex items-center justify-center"
                 >
@@ -2425,6 +2514,18 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
               {cust.license_front_path && (
                 <a href={cust.license_front_path} target="_blank" rel="noreferrer" className="text-xs text-teal-655 font-bold bg-teal-500/10 border border-teal-500/20 px-2.5 py-2 rounded min-h-[44px] flex items-center">License</a>
               )}
+              {Array.isArray(cust.extra_documents) && cust.extra_documents.map((doc, dIdx) => (
+                <a 
+                  key={dIdx} 
+                  href={doc.file_path} 
+                  target="_blank" 
+                  rel="noreferrer" 
+                  className="text-xs text-indigo-700 dark:text-indigo-400 font-bold bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-2 rounded min-h-[44px] flex items-center gap-1"
+                >
+                  <FileText className="h-3 w-3" />
+                  <span className="max-w-[80px] truncate">{doc.title ? doc.title.replace("Guarantor ", "G ") : "PDF"}</span>
+                </a>
+              ))}
             </div>
           </div>
         ))}
@@ -2615,6 +2716,124 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
                 </div>
               </div>
 
+              {/* Extra Documents & Guarantor PDFs with Progress Bar Pill */}
+              <div className="border-t border-[var(--border-color)] pt-4 space-y-3">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-500">
+                      Multi-PDF & Document Vault (Guarantors, Deeds, Cheques)
+                    </p>
+                    <p className="text-[10px] text-[var(--text-muted)]">
+                      Upload multiple PDF documents with verification status for guarantor CNICs, affidavits or stamp papers.
+                    </p>
+                  </div>
+                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border border-indigo-500/20">
+                    {extraDocsList.length} Attached
+                  </span>
+                </div>
+
+                <div className="bg-[var(--bg-app)]/70 p-3 rounded-xl border border-[var(--border-color)] space-y-2.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-[var(--text-muted)] mb-1">Document Preset / Type</label>
+                      <select 
+                        value={newDocPreset}
+                        onChange={(e) => setNewDocPreset(e.target.value)}
+                        className="w-full app-input rounded-lg p-2 text-xs"
+                      >
+                        <option value="Guarantor 1 CNIC / Document">Guarantor 1 CNIC / Document</option>
+                        <option value="Guarantor 2 CNIC / Document">Guarantor 2 CNIC / Document</option>
+                        <option value="Guarantor Affidavit / Undertaking">Guarantor Affidavit / Undertaking</option>
+                        <option value="Stamp Paper / Lease Agreement">Stamp Paper / Lease Agreement</option>
+                        <option value="Security Cheque Photo / Slip">Security Cheque Photo / Slip</option>
+                        <option value="Utility Bill / Address Verification">Utility Bill / Address Verification</option>
+                        <option value="Business Card / Employment Letter">Business Card / Employment Letter</option>
+                        <option value="Additional KYC Document">Additional KYC Document</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-[var(--text-muted)] mb-1">Select File (PDF / Image)</label>
+                      <input 
+                        type="file" 
+                        accept=".pdf,image/*" 
+                        disabled={docUploadLoading}
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) {
+                            handleAttachExtraDoc(f, newDocPreset);
+                            e.target.value = "";
+                          }
+                        }}
+                        className="w-full text-xs text-[var(--text-main)] file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 cursor-pointer"
+                      />
+                    </div>
+                  </div>
+
+                  {docUploadLoading && (
+                    <div className="p-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center gap-2 text-xs text-indigo-700 dark:text-indigo-400">
+                      <div className="w-3.5 h-3.5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin shrink-0" />
+                      <span>Uploading & verifying document checksum...</span>
+                    </div>
+                  )}
+
+                  {/* List of attached extra documents with Progress/Verification bar */}
+                  <div className="space-y-2 max-h-48 overflow-y-auto pt-1">
+                    {extraDocsList.length === 0 ? (
+                      <p className="text-[11px] italic text-[var(--text-muted)] text-center py-2">
+                        No extra guarantor documents attached yet. Choose a preset above to attach.
+                      </p>
+                    ) : (
+                      extraDocsList.map((doc, idx) => (
+                        <div key={idx} className="bg-[var(--bg-app)] border border-[var(--border-color)] rounded-xl p-2.5 space-y-1.5 shadow-sm">
+                          <div className="flex justify-between items-center text-xs">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="p-1 rounded bg-indigo-500/15 text-indigo-600 dark:text-indigo-400">
+                                <FileText className="h-3.5 w-3.5 shrink-0" />
+                              </span>
+                              <div className="min-w-0">
+                                <span className="font-bold text-[var(--text-main)] block truncate">{doc.title}</span>
+                                <span className="text-[10px] text-[var(--text-muted)] font-mono block truncate">{doc.filename || "file"}</span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <a 
+                                href={doc.file_path} 
+                                target="_blank" 
+                                rel="noreferrer" 
+                                className="text-[10px] font-bold text-teal-600 dark:text-teal-400 hover:underline px-2 py-1 rounded bg-teal-500/10 border border-teal-500/20"
+                              >
+                                View
+                              </a>
+                              <button 
+                                type="button" 
+                                onClick={() => removeExtraDoc(idx)}
+                                className="text-rose-500 hover:text-rose-400 p-1"
+                                title="Remove document"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Progress bar pill for each extra PDF / Document */}
+                          <div className="space-y-0.5">
+                            <div className="flex justify-between text-[9px] font-bold">
+                              <span className="text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
+                                <Check className="h-2.5 w-2.5" /> Document Attached & Ready
+                              </span>
+                              <span className="font-mono text-emerald-700 dark:text-emerald-400">100% Verified</span>
+                            </div>
+                            <div className="w-full bg-slate-900/30 rounded-full h-1.5 overflow-hidden">
+                              <div className="bg-gradient-to-r from-emerald-500 to-teal-400 h-1.5 rounded-full w-full" />
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+
               <button 
                 type="submit"
                 disabled={!!blacklistWarning}
@@ -2637,10 +2856,13 @@ function estimateBookingCharges(b) {
   if (!b) return { days: 0, rent: 0, chauffeur: 0, total: 0 };
   const start = new Date(b.start_datetime);
   const end = new Date(b.expected_end_datetime);
-  const days = Math.max(1, Math.ceil(Math.abs(end - start) / (1000 * 60 * 60 * 24)));
+  const rawDays = Math.max(1, Math.ceil(Math.abs(end - start) / (1000 * 60 * 60 * 24)));
+  const days = (b.billable_days !== null && b.billable_days !== undefined && Number(b.billable_days) > 0)
+    ? Number(b.billable_days)
+    : rawDays;
   const rent = days * (b.daily_rate || 0);
   const chauffeur = b.is_chauffeur_driven ? days * (b.chauffeur_daily_wage || 0) : 0;
-  return { days, rent, chauffeur, total: rent + chauffeur };
+  return { days, rent, chauffeur, total: rent + chauffeur, rawDays };
 }
 
 function generateRentalContract(booking, brandingName = "Rent A Car Management System") {
@@ -2813,6 +3035,49 @@ function BookingsView({
       </div>
     );
   }
+
+  const [editingBookingId, setEditingBookingId] = useState(null);
+
+  const openEditBooking = (b) => {
+    setEditingBookingId(b.id);
+    const startDt = b.start_datetime ? new Date(b.start_datetime).toISOString().slice(0, 16) : "";
+    const endDt = b.expected_end_datetime ? new Date(b.expected_end_datetime).toISOString().slice(0, 16) : "";
+    const bookedCars = (b.booked_cars && b.booked_cars.length > 0)
+      ? b.booked_cars.map(bc => ({
+          car_id: bc.car_id,
+          make_model: bc.car?.make_model || bc.make_model || "Car",
+          plate_number: bc.car?.plate_number || bc.plate_number || "",
+          daily_rate: bc.daily_rate || 3000
+        }))
+      : [{
+          car_id: b.car_id,
+          make_model: b.car?.make_model || "Car",
+          plate_number: b.car?.plate_number || "",
+          daily_rate: b.daily_rate || 3000
+        }];
+    setForm({
+      car_id: b.car_id,
+      customer_id: b.customer_id,
+      start_datetime: startDt,
+      expected_end_datetime: endDt,
+      daily_rate: b.daily_rate || 3000,
+      is_chauffeur_driven: !!b.is_chauffeur_driven,
+      chauffeur_daily_wage: b.chauffeur_daily_wage || 1500,
+      security_deposit_amount: b.security_deposit_amount || 0,
+      security_deposit_type: b.security_deposit_type || "Cash",
+      security_deposit_status: b.security_deposit_status || "Held",
+      booking_type: b.booking_type || "Individual",
+      company_name: b.company_name || "",
+      booked_cars: bookedCars,
+      driver_type: b.driver_type || "Company Driver",
+      driver_name: b.driver_name || "",
+      driver_phone: b.driver_phone || "",
+      driver_cnic: b.driver_cnic || "",
+      billable_days: b.billable_days !== null && b.billable_days !== undefined ? b.billable_days : "",
+      specific_days_notes: b.specific_days_notes || ""
+    });
+    setShowModal(true);
+  };
 
   const [returnForm, setReturnForm] = useState({
     actual_return_datetime: "", return_odometer: 0, fuel_level: "Full",
@@ -3011,6 +3276,10 @@ function BookingsView({
       daily_rate: parseFloat(c.daily_rate) || 0
     }));
 
+    const billableDaysVal = form.billable_days !== "" && form.billable_days !== null && form.billable_days !== undefined
+      ? parseInt(form.billable_days, 10)
+      : null;
+
     const payload = {
       ...form,
       car_id: bookedCarsPayload[0].car_id,
@@ -3020,21 +3289,31 @@ function BookingsView({
       chauffeur_daily_wage: parseFloat(form.chauffeur_daily_wage) || 0,
       booking_type: form.booking_type || "Individual",
       company_name: form.booking_type === "Company" ? form.company_name : null,
-      booked_cars: bookedCarsPayload
+      booked_cars: bookedCarsPayload,
+      driver_type: form.driver_type || "Company Driver",
+      driver_name: form.driver_type === "Freelance Driver" ? form.driver_name : null,
+      driver_phone: form.driver_type === "Freelance Driver" ? form.driver_phone : null,
+      driver_cnic: form.driver_type === "Freelance Driver" ? form.driver_cnic : null,
+      billable_days: billableDaysVal,
+      specific_days_notes: form.specific_days_notes || ""
     };
 
-    const res = await fetch("/api/bookings", {
-      method: "POST",
+    const endpoint = editingBookingId ? `/api/bookings/${editingBookingId}` : "/api/bookings";
+    const method = editingBookingId ? "PUT" : "POST";
+
+    const res = await fetch(endpoint, {
+      method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     });
 
     if (res.ok) {
       setShowModal(false);
+      setEditingBookingId(null);
       fetchData();
     } else {
       const data = await res.json();
-      setErrorMessage(data.detail || "Booking dates overlap check failed.");
+      setErrorMessage(data.detail || "Booking save failed.");
     }
   };
 
@@ -3065,7 +3344,10 @@ function BookingsView({
     const actualEnd = new Date(returnForm.actual_return_datetime || new Date());
 
     const baseDiffTime = Math.abs(expectedEnd - start);
-    const baseDays = Math.max(1, Math.ceil(baseDiffTime / (1000 * 60 * 60 * 24)));
+    const rawDays = Math.max(1, Math.ceil(baseDiffTime / (1000 * 60 * 60 * 24)));
+    const baseDays = (selectedBooking.billable_days !== null && selectedBooking.billable_days !== undefined && Number(selectedBooking.billable_days) > 0)
+      ? Number(selectedBooking.billable_days)
+      : rawDays;
     const baseFare = baseDays * selectedBooking.daily_rate;
 
     let driverWage = 0;
@@ -3381,6 +3663,7 @@ function BookingsView({
         </div>
         <ShimmerButton 
           onClick={() => {
+            setEditingBookingId(null);
             setForm({
               car_id: "",
               customer_id: "",
@@ -3391,7 +3674,16 @@ function BookingsView({
               chauffeur_daily_wage: 1500,
               security_deposit_amount: 10000,
               security_deposit_type: "Cash",
-              security_deposit_status: "Held"
+              security_deposit_status: "Held",
+              booking_type: "Individual",
+              company_name: "",
+              booked_cars: [],
+              driver_type: "Company Driver",
+              driver_name: "",
+              driver_phone: "",
+              driver_cnic: "",
+              billable_days: "",
+              specific_days_notes: ""
             });
             setShowModal(true);
           }}
@@ -3402,7 +3694,359 @@ function BookingsView({
         </ShimmerButton>
       </div>
 
-      {/* Interactive Month Grid Calendar View */}
+      {/* Bookings Filters and Search */}
+      <div className="flex flex-col md:flex-row gap-4">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-3.5 h-4 w-4 text-[var(--text-muted)]" />
+          <input 
+            type="text" 
+            placeholder="Filter bookings by Customer Name or Plate..." 
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full app-input rounded-xl py-3 pl-10 pr-4 text-sm focus:outline-none"
+          />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {["All", "Active", "Reserved", "Completed", "Cancelled"].map(st => (
+            <button
+              key={st}
+              onClick={() => setStatusFilter(st)}
+              className={`px-4 py-2 rounded-xl text-xs font-semibold border transition-all min-h-[44px] ${
+                statusFilter === st 
+                  ? "btn-accent text-white font-bold" 
+                  : "bg-[var(--bg-app)] border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-main)]"
+              }`}
+            >
+              {st}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Bookings List Table */}
+      <div className="hidden md:block glass-panel rounded-2xl border border-[var(--border-color)] overflow-hidden">
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="bg-slate-900/20 border-b border-[var(--border-color)] text-[var(--text-muted)] text-xs font-semibold uppercase tracking-wider">
+              <th className="p-4">Customer</th>
+              <th className="p-4">Car (Plate)</th>
+              <th className="p-4">Booking Period</th>
+              <th className="p-4">Daily Rate & Driver</th>
+              <th className="p-4">Payment Ledger / Dues</th>
+              <th className="p-4">Deposit</th>
+              <th className="p-4">Status</th>
+              <th className="p-4 text-right">Actions / Check-in</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-850 text-sm">
+            {filteredBookings.map(b => (
+              <tr key={b.id} className="hover:bg-[var(--tr-hover)] transition-colors">
+                <td className="p-4 font-bold text-[var(--text-main)]">
+                  <div>{b.customer?.full_name}</div>
+                  {b.booking_type === "Company" && (
+                    <span className="text-[10px] text-indigo-500 font-bold block">Corp: {b.company_name}</span>
+                  )}
+                </td>
+                <td className="p-4">
+                  <span className="font-bold text-[var(--text-main)] block">{b.car?.make_model}</span>
+                  <span className="text-xs text-teal-700 dark:text-teal-400 font-mono">{b.car?.plate_number}</span>
+                </td>
+                <td className="p-4">
+                  <div className="text-xs">
+                    <span>S: {new Date(b.start_datetime).toLocaleDateString()}</span>
+                    <span className="block text-[var(--text-muted)]">E: {new Date(b.expected_end_datetime).toLocaleDateString()}</span>
+                    {b.billable_days ? (
+                      <span className="text-[10px] text-teal-600 dark:text-teal-400 font-bold block mt-0.5">
+                        {b.billable_days} billable days {b.specific_days_notes ? `(${b.specific_days_notes})` : ""}
+                      </span>
+                    ) : null}
+                  </div>
+                </td>
+                <td className="p-4 text-xs">
+                  <div className="font-bold text-[var(--text-main)]">PKR {b.daily_rate.toLocaleString()}/d</div>
+                  {b.is_chauffeur_driven ? (
+                    <div className="text-[10px] text-teal-600 dark:text-teal-400 font-semibold mt-0.5">
+                      {b.driver_type === "Freelance Driver" 
+                        ? `Freelance: ${b.driver_name || "Driver"} (PKR ${b.chauffeur_daily_wage}/d)`
+                        : `Staff Driver (PKR ${b.chauffeur_daily_wage}/d)`}
+                    </div>
+                  ) : (
+                    <span className="text-[10px] text-[var(--text-muted)] italic">Self Driven</span>
+                  )}
+                </td>
+                <td className="p-4">
+                  {(() => {
+                    const charges = estimateBookingCharges(b);
+                    const paid = (financials || []).filter(f => f.booking_id === b.id).reduce((s, f) => s + (f.amount_paid || 0), 0);
+                    const remaining = Math.max(0, charges.total - paid);
+                    return (
+                      <div className="text-xs space-y-0.5 min-w-[130px]">
+                        <div className="flex justify-between gap-1 text-[11px]">
+                          <span className="text-[var(--text-muted)]">Total:</span>
+                          <span className="font-mono font-bold text-[var(--text-main)]">PKR {charges.total.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between gap-1 text-[11px]">
+                          <span className="text-[var(--text-muted)]">Advance:</span>
+                          <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">PKR {paid.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between gap-1 text-[11px] pt-0.5 border-t border-[var(--border-color)]">
+                          <span className="text-[var(--text-muted)] font-semibold">Remaining:</span>
+                          <span className={`font-mono font-bold ${remaining > 0 ? "text-amber-700 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400"}`}>
+                            PKR {remaining.toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </td>
+                <td className="p-4">
+                  <span className="block text-xs font-mono">PKR {b.security_deposit_amount}</span>
+                  <span className="text-[10px] text-[var(--text-muted)]">({b.security_deposit_type})</span>
+                </td>
+                <td className="p-4">
+                  <span className={`px-2 py-0.5 rounded text-xs ${
+                    b.status === "Active" ? "bg-teal-500/10 text-teal-700 dark:text-teal-400" : 
+                    b.status === "Reserved" ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" :
+                    b.status === "Completed" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" :
+                    "bg-red-500/10 text-red-700 dark:text-red-400"
+                  }`}>
+                    {b.status}
+                  </span>
+                </td>
+                <td className="p-4 text-right space-x-2">
+                  <button
+                    onClick={() => openEditBooking(b)}
+                    className="bg-[var(--bg-app)] hover:border-[var(--accent-color)] text-[var(--accent-color)] px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-[var(--border-color)] min-h-[44px] inline-flex items-center justify-center"
+                    title="Edit Reservation"
+                  >
+                    <Edit2 className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => generateRentalContract(b, branding?.name)}
+                    className="bg-[var(--bg-app)] hover:border-[var(--accent-color)] text-[var(--text-main)] px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-[var(--border-color)] min-h-[44px]"
+                    title="Rental contract PDF"
+                  >
+                    <FileText className="h-3.5 w-3.5 inline" />
+                  </button>
+                  <button
+                    onClick={() => openPaymentLedger(b)}
+                    className="bg-[var(--bg-app)] hover:border-[var(--accent-color)] text-[var(--text-main)] px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-[var(--border-color)] min-h-[44px]"
+                    title="Payment ledger"
+                  >
+                    <Wallet className="h-3.5 w-3.5 inline" />
+                  </button>
+                  {b.status === "Active" && (
+                    <button 
+                      onClick={() => { setSelectedBooking(b); setShowReturnModal(true); }}
+                      className="bg-teal-600/15 hover:bg-teal-600 hover:text-white text-teal-700 dark:text-teal-400 px-3 py-1.5 rounded-lg text-xs font-semibold border border-teal-500/20 min-h-[44px]"
+                    >
+                      Receive Return
+                    </button>
+                  )}
+                  {b.status === "Completed" && (
+                    <Button 
+                      variant="outline" 
+                      onClick={() => {
+                        setSelectedBooking(b);
+                        setTimeout(() => {
+                          const doc = new jsPDF();
+                          doc.setFillColor(197, 155, 39);
+                          doc.rect(0, 0, 210, 40, "F");
+                          doc.setTextColor(255, 255, 255);
+                          doc.setFont("helvetica", "bold");
+                          doc.setFontSize(20);
+                          doc.text((branding.name || "Rent A Car Management System").toUpperCase(), 15, 22);
+                          doc.setFontSize(9);
+                          doc.setFont("helvetica", "normal");
+                          doc.text(`INVOICE STATEMENT #RMS-${b.id} | COMPLETED AUDIT`, 15, 30);
+                          doc.setTextColor(39, 39, 42);
+                          doc.setFont("helvetica", "bold");
+                          doc.text("CUSTOMER LEASE DETAILS", 15, 55);
+                          doc.setFont("helvetica", "normal");
+                          doc.text(`Customer Name: ${b.customer?.full_name || "N/A"}`, 15, 63);
+                          doc.text(`CNIC Number: ${b.customer?.cnic_number || "N/A"}`, 15, 69);
+                          doc.text(`Phone Primary: ${b.customer?.phone_primary || "N/A"}`, 15, 75);
+                          doc.setFont("helvetica", "bold");
+                          doc.text("VEHICLE & RESERVATION", 120, 55);
+                          doc.setFont("helvetica", "normal");
+                          if (b.booked_cars && b.booked_cars.length > 0) {
+                            let carY = 63;
+                            b.booked_cars.forEach((bc, idx) => {
+                              if (idx < 3) {
+                                doc.text(`${bc.car?.make_model || bc.make_model || "Car"} [${bc.car?.plate_number || bc.plate_number || ""}]`, 120, carY);
+                                carY += 6;
+                              }
+                            });
+                          } else {
+                            doc.text(`Model: ${b.car?.make_model || "N/A"}`, 120, 63);
+                            doc.text(`Plate No: ${b.car?.plate_number || "N/A"}`, 120, 69);
+                            doc.text(`Daily Rate: PKR ${b.daily_rate.toLocaleString()}`, 120, 75);
+                          }
+                          doc.setDrawColor(228, 228, 231);
+                          doc.line(15, 82, 195, 82);
+                          doc.setFillColor(244, 244, 245);
+                          doc.rect(15, 88, 180, 8, "F");
+                          doc.setFont("helvetica", "bold");
+                          doc.text("LEASE PERIOD DETAILS", 18, 93);
+                          doc.text("SCHEDULE", 170, 93, { align: "right" });
+                          doc.setFont("helvetica", "normal");
+                          doc.text(`Start Datetime: ${new Date(b.start_datetime).toLocaleString()}`, 18, 103);
+                          doc.text(`Return Datetime: ${new Date(b.actual_return_datetime || b.expected_end_datetime).toLocaleString()}`, 18, 109);
+                          doc.setFont("helvetica", "bold");
+                          doc.text(`Total Bill Settled: PKR ${sumPaidForBooking(financials, b.id).toLocaleString()}`, 18, 125);
+                          doc.text("PAYMENT RECEIVED", 170, 125, { align: "right" });
+                          doc.setTextColor(197, 155, 39);
+                          doc.setFont("helvetica", "italic");
+                          doc.setFontSize(8);
+                          doc.text("This transaction has been successfully closed and paid in full.", 15, 280);
+                          doc.save(`Invoice_PCS_${b.id}.pdf`);
+                        }, 100);
+                      }}
+                      className="min-h-[44px]"
+                    >
+                      <Download className="h-3 w-3 mr-1" /> PDF Invoice
+                    </Button>
+                  )}
+                  {(b.status === "Active" || b.status === "Reserved") && (
+                    <select 
+                      onChange={(e) => changeBookingStatus(b.id, e.target.value)}
+                      value={b.status}
+                      className="bg-[var(--bg-app)] border border-[var(--border-color)] text-xs rounded p-1 text-[var(--text-muted)] min-h-[44px]"
+                    >
+                      <option value="Reserved">Reserved</option>
+                      <option value="Active">Active</option>
+                      <option value="Cancelled">Cancel</option>
+                    </select>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Bookings Mobile Card Layout */}
+      <div className="grid grid-cols-1 gap-4 md:hidden">
+        {filteredBookings.map(b => (
+          <div key={b.id} className="glass-panel p-4 rounded-xl border border-[var(--border-color)] space-y-3">
+            <div className="flex justify-between items-start gap-2">
+              <div className="min-w-0">
+                <h4 className="font-bold text-sm text-[var(--text-main)] truncate">{b.customer?.full_name}</h4>
+                <p className="text-xs font-bold text-teal-700 dark:text-teal-400 truncate">{b.car?.make_model} ({b.car?.plate_number})</p>
+                {b.booking_type === "Company" && (
+                  <span className="text-[10px] text-indigo-500 font-bold block">Corp: {b.company_name}</span>
+                )}
+              </div>
+              <span className={`shrink-0 px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider ${
+                b.status === "Active" ? "bg-teal-500/10 text-teal-700 dark:text-teal-400 border border-teal-500/20" : 
+                b.status === "Reserved" ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20" :
+                b.status === "Completed" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20" :
+                "bg-red-500/10 text-red-700 dark:text-red-400 border border-red-500/20"
+              }`}>
+                {b.status}
+              </span>
+            </div>
+
+            <div className="text-xs space-y-1 text-[var(--text-muted)]">
+              <p>Period: <span className="text-[var(--text-main)] font-semibold">{new Date(b.start_datetime).toLocaleDateString()} to {new Date(b.expected_end_datetime).toLocaleDateString()}</span></p>
+              {b.billable_days ? (
+                <p className="text-teal-600 dark:text-teal-400 font-bold text-[11px]">
+                  Billable Days: {b.billable_days} {b.specific_days_notes ? `(${b.specific_days_notes})` : ""}
+                </p>
+              ) : null}
+              <p>Daily Rate: <span className="text-[var(--text-main)] font-semibold">PKR {b.daily_rate.toLocaleString()}</span></p>
+              <p>Driver: <span className="text-[var(--text-main)] font-semibold">
+                {b.is_chauffeur_driven 
+                  ? (b.driver_type === "Freelance Driver" ? `Freelance: ${b.driver_name || "Driver"} (PKR ${b.chauffeur_daily_wage}/d)` : `Company Staff (PKR ${b.chauffeur_daily_wage}/d)`)
+                  : "Self Driven"}
+              </span></p>
+              <p>Deposit: <span className="text-[var(--text-main)] font-semibold">PKR {b.security_deposit_amount} ({b.security_deposit_type})</span></p>
+            </div>
+
+            {/* Outside Payment Ledger Display */}
+            {(() => {
+              const charges = estimateBookingCharges(b);
+              const paid = (financials || []).filter(f => f.booking_id === b.id).reduce((s, f) => s + (f.amount_paid || 0), 0);
+              const remaining = Math.max(0, charges.total - paid);
+              return (
+                <div className="p-2.5 rounded-lg bg-[var(--bg-app)] border border-[var(--border-color)] text-xs space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-[var(--text-muted)] text-[11px]">Est. Total Rent:</span>
+                    <span className="font-mono font-bold text-[var(--text-main)]">PKR {charges.total.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[var(--text-muted)] text-[11px]">Advance / Paid:</span>
+                    <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">PKR {paid.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between pt-1 border-t border-[var(--border-color)]">
+                    <span className="text-[var(--text-muted)] text-[11px] font-bold">Remaining Balance:</span>
+                    <span className={`font-mono font-bold ${remaining > 0 ? "text-amber-700 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400"}`}>
+                      PKR {remaining.toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
+
+            <div className="pt-3 border-t border-[var(--border-color)] flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => { setSelectedBooking(b); setShowDetailModal(true); }}
+                className="flex-1 min-w-[30%] bg-[var(--bg-app)] border border-[var(--border-color)] text-[var(--text-main)] font-semibold py-2 rounded-lg text-xs min-h-[44px]"
+              >
+                Details
+              </button>
+              <button
+                type="button"
+                onClick={() => openEditBooking(b)}
+                className="min-h-[44px] min-w-[44px] px-3 bg-[var(--bg-app)] border border-[var(--border-color)] text-[var(--accent-color)] rounded-lg flex items-center justify-center"
+                title="Edit Booking"
+              >
+                <Edit2 className="h-4 w-4 mx-auto" />
+              </button>
+              <button
+                type="button"
+                onClick={() => generateRentalContract(b, branding?.name)}
+                className="min-h-[44px] min-w-[44px] px-3 bg-[var(--bg-app)] border border-[var(--border-color)] rounded-lg"
+                title="Contract PDF"
+              >
+                <FileText className="h-4 w-4 mx-auto" />
+              </button>
+              <button
+                type="button"
+                onClick={() => openPaymentLedger(b)}
+                className="min-h-[44px] min-w-[44px] px-3 bg-[var(--bg-app)] border border-[var(--border-color)] rounded-lg"
+                title="Payments"
+              >
+                <Wallet className="h-4 w-4 mx-auto" />
+              </button>
+              {(b.status === "Active" || b.status === "Reserved") && (
+                <>
+                  {b.status === "Active" && (
+                    <button 
+                      onClick={() => { setSelectedBooking(b); setShowReturnModal(true); }}
+                      className="flex-1 min-w-[45%] bg-teal-600 hover:bg-teal-500 text-white font-bold py-2 rounded-lg text-xs min-h-[44px]"
+                    >
+                      Receive Return
+                    </button>
+                  )}
+                  <select 
+                    onChange={(e) => changeBookingStatus(b.id, e.target.value)}
+                    value={b.status}
+                    className="flex-1 min-w-[40%] bg-[var(--bg-app)] border border-[var(--border-color)] text-xs rounded-lg px-2 text-[var(--text-muted)] min-h-[44px]"
+                  >
+                    <option value="Reserved">Reserved</option>
+                    <option value="Active">Active</option>
+                    <option value="Cancelled">Cancel</option>
+                  </select>
+                </>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Interactive Month Grid Calendar View (Moved Below) */}
       <CalendarGridSection 
         bookings={bookings} 
         cars={cars}
@@ -3416,7 +4060,7 @@ function BookingsView({
         onDayOverflow={(list) => setDayListBookings(list)}
       />
 
-      {/* Visual Timeline scheduler representation */}
+      {/* Visual Timeline scheduler representation (Moved Below) */}
       <Card className="shadow-lg border-[var(--border-color)]">
         <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between pb-3 border-b border-[var(--border-color)] p-4 sm:p-6">
           <div className="min-w-0">
@@ -3504,278 +4148,6 @@ function BookingsView({
           })}
         </CardContent>
       </Card>
-
-      {/* Bookings Filters and Search */}
-      <div className="flex flex-col md:flex-row gap-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-3.5 h-4 w-4 text-[var(--text-muted)]" />
-          <input 
-            type="text" 
-            placeholder="Filter bookings by Customer Name or Plate..." 
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full app-input rounded-xl py-3 pl-10 pr-4 text-sm focus:outline-none"
-          />
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {["All", "Active", "Reserved", "Completed", "Cancelled"].map(st => (
-            <button
-              key={st}
-              onClick={() => setStatusFilter(st)}
-              className={`px-4 py-2 rounded-xl text-xs font-semibold border transition-all min-h-[44px] ${
-                statusFilter === st 
-                  ? "btn-accent text-white font-bold" 
-                  : "bg-[var(--bg-app)] border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-main)]"
-              }`}
-            >
-              {st}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Bookings List Table */}
-      <div className="hidden md:block glass-panel rounded-2xl border border-[var(--border-color)] overflow-hidden">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="bg-slate-900/20 border-b border-[var(--border-color)] text-[var(--text-muted)] text-xs font-semibold uppercase tracking-wider">
-              <th className="p-4">Customer</th>
-              <th className="p-4">Car (Plate)</th>
-              <th className="p-4">Booking Period</th>
-              <th className="p-4">Daily Rate</th>
-              <th className="p-4">Driver</th>
-              <th className="p-4">Deposit</th>
-              <th className="p-4">Status</th>
-              <th className="p-4 text-right">Invoice Check-in / Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-850 text-sm">
-            {filteredBookings.map(b => (
-              <tr key={b.id} className="hover:bg-[var(--tr-hover)] transition-colors">
-                <td className="p-4 font-bold text-[var(--text-main)]">{b.customer?.full_name}</td>
-                <td className="p-4">
-                  <span className="font-bold text-[var(--text-main)] block">{b.car?.make_model}</span>
-                  <span className="text-xs text-teal-700 dark:text-teal-400 font-mono">{b.car?.plate_number}</span>
-                </td>
-                <td className="p-4">
-                  <div className="text-xs">
-                    <span>S: {new Date(b.start_datetime).toLocaleString()}</span>
-                    <span className="block text-[var(--text-muted)]">E: {new Date(b.expected_end_datetime).toLocaleString()}</span>
-                  </div>
-                </td>
-                <td className="p-4">PKR {b.daily_rate.toLocaleString()}</td>
-                <td className="p-4 text-xs">{b.is_chauffeur_driven ? "Yes" : "No"}</td>
-                <td className="p-4">
-                  <span className="block text-xs">PKR {b.security_deposit_amount}</span>
-                  <span className="text-[10px] text-[var(--text-muted)]">({b.security_deposit_type})</span>
-                </td>
-                <td className="p-4">
-                  <span className={`px-2 py-0.5 rounded text-xs ${
-                    b.status === "Active" ? "bg-teal-500/10 text-teal-700 dark:text-teal-400" : 
-                    b.status === "Reserved" ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" :
-                    b.status === "Completed" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" :
-                    "bg-red-500/10 text-red-700 dark:text-red-400"
-                  }`}>
-                    {b.status}
-                  </span>
-                </td>
-                <td className="p-4 text-right space-x-2">
-                  {b.status === "Active" || b.status === "Reserved" ? (
-                    <>
-                      <button
-                        onClick={() => generateRentalContract(b, branding?.name)}
-                        className="bg-[var(--bg-app)] hover:border-[var(--accent-color)] text-[var(--text-main)] px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-[var(--border-color)] min-h-[44px]"
-                        title="Rental contract PDF"
-                      >
-                        <FileText className="h-3.5 w-3.5 inline" />
-                      </button>
-                      <button
-                        onClick={() => openPaymentLedger(b)}
-                        className="bg-[var(--bg-app)] hover:border-[var(--accent-color)] text-[var(--text-main)] px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-[var(--border-color)] min-h-[44px]"
-                        title="Payment ledger"
-                      >
-                        <Wallet className="h-3.5 w-3.5 inline" />
-                      </button>
-                      {b.status === "Active" && (
-                        <button 
-                          onClick={() => { setSelectedBooking(b); setShowReturnModal(true); }}
-                          className="bg-teal-600/15 hover:bg-teal-600 hover:text-white text-teal-700 dark:text-teal-400 px-3 py-1.5 rounded-lg text-xs font-semibold border border-teal-500/20 min-h-[44px]"
-                        >
-                          Receive Return
-                        </button>
-                      )}
-                      <select 
-                        onChange={(e) => changeBookingStatus(b.id, e.target.value)}
-                        value={b.status}
-                        className="bg-[var(--bg-app)] border border-[var(--border-color)] text-xs rounded p-1 text-[var(--text-muted)] min-h-[44px]"
-                      >
-                        <option value="Reserved">Reserved</option>
-                        <option value="Active">Active</option>
-                        <option value="Cancelled">Cancel</option>
-                      </select>
-                    </>
-                  ) : b.status === "Completed" ? (
-                    <>
-                      <button
-                        onClick={() => generateRentalContract(b, branding?.name)}
-                        className="bg-[var(--bg-app)] text-[var(--text-main)] px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-[var(--border-color)] min-h-[44px]"
-                      >
-                        <FileText className="h-3.5 w-3.5 inline" />
-                      </button>
-                      <button
-                        onClick={() => openPaymentLedger(b)}
-                        className="bg-[var(--bg-app)] text-[var(--text-main)] px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-[var(--border-color)] min-h-[44px]"
-                      >
-                        <Wallet className="h-3.5 w-3.5 inline" />
-                      </button>
-                    <Button 
-                      variant="outline" 
-                      onClick={() => {
-                        setSelectedBooking(b);
-                        setTimeout(() => {
-                          const doc = new jsPDF();
-                          doc.setFillColor(197, 155, 39);
-                          doc.rect(0, 0, 210, 40, "F");
-                          doc.setTextColor(255, 255, 255);
-                          doc.setFont("helvetica", "bold");
-                          doc.setFontSize(20);
-                          doc.text((branding.name || "Rent A Car Management System").toUpperCase(), 15, 22);
-                          doc.setFontSize(9);
-                          doc.setFont("helvetica", "normal");
-                          doc.text(`INVOICE STATEMENT #RMS-${b.id} | COMPLETED AUDIT`, 15, 30);
-                          doc.setTextColor(39, 39, 42);
-                          doc.setFont("helvetica", "bold");
-                          doc.text("CUSTOMER LEASE DETAILS", 15, 55);
-                          doc.setFont("helvetica", "normal");
-                          doc.text(`Customer Name: ${b.customer?.full_name || "N/A"}`, 15, 63);
-                          doc.text(`CNIC Number: ${b.customer?.cnic_number || "N/A"}`, 15, 69);
-                          doc.text(`Phone Primary: ${b.customer?.phone_primary || "N/A"}`, 15, 75);
-                          doc.setFont("helvetica", "bold");
-                          doc.text("VEHICLE & RESERVATION", 120, 55);
-                          doc.setFont("helvetica", "normal");
-                          if (b.booked_cars && b.booked_cars.length > 0) {
-                            let carY = 63;
-                            b.booked_cars.forEach((bc, idx) => {
-                              if (idx < 3) {
-                                doc.text(`${bc.car?.make_model || bc.make_model || "Car"} [${bc.car?.plate_number || bc.plate_number || ""}]`, 120, carY);
-                                carY += 6;
-                              }
-                            });
-                          } else {
-                            doc.text(`Model: ${b.car?.make_model || "N/A"}`, 120, 63);
-                            doc.text(`Plate No: ${b.car?.plate_number || "N/A"}`, 120, 69);
-                            doc.text(`Daily Rate: PKR ${b.daily_rate.toLocaleString()}`, 120, 75);
-                          }
-                          doc.setDrawColor(228, 228, 231);
-                          doc.line(15, 82, 195, 82);
-                          doc.setFillColor(244, 244, 245);
-                          doc.rect(15, 88, 180, 8, "F");
-                          doc.setFont("helvetica", "bold");
-                          doc.text("LEASE PERIOD DETAILS", 18, 93);
-                          doc.text("SCHEDULE", 170, 93, { align: "right" });
-                          doc.setFont("helvetica", "normal");
-                          doc.text(`Start Datetime: ${new Date(b.start_datetime).toLocaleString()}`, 18, 103);
-                          doc.text(`Return Datetime: ${new Date(b.actual_return_datetime || b.expected_end_datetime).toLocaleString()}`, 18, 109);
-                          doc.setFont("helvetica", "bold");
-                          doc.text(`Total Bill Settled: PKR ${sumPaidForBooking(financials, b.id).toLocaleString()}`, 18, 125);
-                          doc.text("PAYMENT RECEIVED", 170, 125, { align: "right" });
-                          doc.setTextColor(197, 155, 39);
-                          doc.setFont("helvetica", "italic");
-                          doc.setFontSize(8);
-                          doc.text("This transaction has been successfully closed and paid in full.", 15, 280);
-                          doc.save(`Invoice_PCS_${b.id}.pdf`);
-                        }, 100);
-                      }}
-                      className="min-h-[44px]"
-                    >
-                      <Download className="h-3 w-3 mr-1" /> PDF Invoice
-                    </Button>
-                    </>
-                  ) : (
-                    <span className="text-[var(--text-muted)] text-xs italic font-medium">Finished ({b.status})</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Bookings Mobile Card Layout */}
-      <div className="grid grid-cols-1 gap-4 md:hidden">
-        {filteredBookings.map(b => (
-          <div key={b.id} className="glass-panel p-4 rounded-xl border border-[var(--border-color)] space-y-3">
-            <div className="flex justify-between items-start gap-2">
-              <div className="min-w-0">
-                <h4 className="font-bold text-sm text-[var(--text-main)] truncate">{b.customer?.full_name}</h4>
-                <p className="text-xs font-bold text-teal-700 dark:text-teal-400 truncate">{b.car?.make_model} ({b.car?.plate_number})</p>
-              </div>
-              <span className={`shrink-0 px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider ${
-                b.status === "Active" ? "bg-teal-500/10 text-teal-700 dark:text-teal-400 border border-teal-500/20" : 
-                b.status === "Reserved" ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20" :
-                b.status === "Completed" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20" :
-                "bg-red-500/10 text-red-700 dark:text-red-400 border border-red-500/20"
-              }`}>
-                {b.status}
-              </span>
-            </div>
-
-            <div className="text-xs space-y-1 text-[var(--text-muted)]">
-              <p>Period: <span className="text-[var(--text-main)] font-semibold">{new Date(b.start_datetime).toLocaleDateString()} to {new Date(b.expected_end_datetime).toLocaleDateString()}</span></p>
-              <p>Daily Rate: <span className="text-[var(--text-main)] font-semibold">PKR {b.daily_rate.toLocaleString()}</span></p>
-              <p>Chauffeur: <span className="text-[var(--text-main)] font-semibold">{b.is_chauffeur_driven ? "Yes" : "No"}</span></p>
-              <p>Deposit: <span className="text-[var(--text-main)] font-semibold">PKR {b.security_deposit_amount} ({b.security_deposit_type})</span></p>
-            </div>
-
-            <div className="pt-3 border-t border-[var(--border-color)] flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => { setSelectedBooking(b); setShowDetailModal(true); }}
-                className="flex-1 min-w-[40%] bg-[var(--bg-app)] border border-[var(--border-color)] text-[var(--text-main)] font-semibold py-2 rounded-lg text-xs min-h-[44px]"
-              >
-                Details
-              </button>
-              <button
-                type="button"
-                onClick={() => generateRentalContract(b, branding?.name)}
-                className="min-h-[44px] min-w-[44px] px-3 bg-[var(--bg-app)] border border-[var(--border-color)] rounded-lg"
-                title="Contract PDF"
-              >
-                <FileText className="h-4 w-4 mx-auto" />
-              </button>
-              <button
-                type="button"
-                onClick={() => openPaymentLedger(b)}
-                className="min-h-[44px] min-w-[44px] px-3 bg-[var(--bg-app)] border border-[var(--border-color)] rounded-lg"
-                title="Payments"
-              >
-                <Wallet className="h-4 w-4 mx-auto" />
-              </button>
-              {(b.status === "Active" || b.status === "Reserved") && (
-                <>
-                  {b.status === "Active" && (
-                    <button 
-                      onClick={() => { setSelectedBooking(b); setShowReturnModal(true); }}
-                      className="flex-1 min-w-[45%] bg-teal-600 hover:bg-teal-500 text-white font-bold py-2 rounded-lg text-xs min-h-[44px]"
-                    >
-                      Receive Return
-                    </button>
-                  )}
-                  <select 
-                    onChange={(e) => changeBookingStatus(b.id, e.target.value)}
-                    value={b.status}
-                    className="flex-1 min-w-[40%] bg-[var(--bg-app)] border border-[var(--border-color)] text-xs rounded-lg px-2 text-[var(--text-muted)] min-h-[44px]"
-                  >
-                    <option value="Reserved">Reserved</option>
-                    <option value="Active">Active</option>
-                    <option value="Cancelled">Cancel</option>
-                  </select>
-                </>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
 
       {/* Day overflow list (+N More) */}
       {dayListBookings && (
@@ -3897,11 +4269,23 @@ function BookingsView({
                   <span className="font-semibold text-[var(--text-main)]">PKR {selectedBooking.daily_rate?.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[var(--text-muted)]">Chauffeur</span>
+                  <span className="text-[var(--text-muted)]">Driver / Chauffeur</span>
                   <span className="font-semibold text-[var(--text-main)]">
-                    {selectedBooking.is_chauffeur_driven ? `Yes (PKR ${selectedBooking.chauffeur_daily_wage}/day)` : "No"}
+                    {selectedBooking.is_chauffeur_driven 
+                      ? (selectedBooking.driver_type === "Freelance Driver"
+                          ? `Freelance: ${selectedBooking.driver_name || "Driver"}${selectedBooking.driver_phone ? ` (${selectedBooking.driver_phone})` : ""} · PKR ${selectedBooking.chauffeur_daily_wage}/d`
+                          : `Staff Driver (PKR ${selectedBooking.chauffeur_daily_wage}/d)`)
+                      : "Self Driven"}
                   </span>
                 </div>
+                {selectedBooking.billable_days ? (
+                  <div className="flex justify-between">
+                    <span className="text-[var(--text-muted)]">Billable Schedule</span>
+                    <span className="font-semibold text-teal-600 dark:text-teal-400">
+                      {selectedBooking.billable_days} Billable Days {selectedBooking.specific_days_notes ? `(${selectedBooking.specific_days_notes})` : ""}
+                    </span>
+                  </div>
+                ) : null}
                 <div className="flex justify-between">
                   <span className="text-[var(--text-muted)]">Deposit</span>
                   <span className="font-semibold text-[var(--text-main)]">
@@ -3912,6 +4296,16 @@ function BookingsView({
             </div>
 
             <div className="flex flex-wrap gap-2 pt-2 border-t border-[var(--border-color)]">
+              <button
+                onClick={() => {
+                  const b = selectedBooking;
+                  setShowDetailModal(false);
+                  openEditBooking(b);
+                }}
+                className="flex-1 bg-[var(--bg-app)] border border-[var(--border-color)] hover:border-[var(--accent-color)] text-[var(--accent-color)] font-semibold py-2 rounded-lg text-xs min-h-[44px] flex items-center justify-center gap-1"
+              >
+                <Edit2 className="h-3.5 w-3.5" /> Edit Booking
+              </button>
               <button
                 onClick={() => generateRentalContract(selectedBooking, branding?.name)}
                 className="flex-1 bg-[var(--bg-app)] border border-[var(--border-color)] hover:border-[var(--accent-color)] text-[var(--text-main)] font-semibold py-2 rounded-lg text-xs min-h-[44px] flex items-center justify-center gap-1"
@@ -4069,8 +4463,8 @@ function BookingsView({
         <div className="fixed inset-0 modal-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
           <div className="glass-panel modal-sheet w-full max-w-lg rounded-2xl p-6 shadow-2xl space-y-6 border border-[var(--border-color)] max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center pb-4 border-b border-[var(--border-color)]">
-              <h3 className="text-xl font-bold text-[var(--text-main)]">Create Booking</h3>
-              <button onClick={() => setShowModal(false)} className="text-[var(--text-muted)] hover:text-[var(--text-main)]">
+              <h3 className="text-xl font-bold text-[var(--text-main)]">{editingBookingId ? `Edit Booking #${editingBookingId}` : "Create Booking"}</h3>
+              <button onClick={() => { setShowModal(false); setEditingBookingId(null); }} className="text-[var(--text-muted)] hover:text-[var(--text-main)]">
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -4355,6 +4749,57 @@ function BookingsView({
                 </div>
               </div>
 
+              {/* Specific Billable Days Option */}
+              <div className="p-3 rounded-xl border border-[var(--border-color)] bg-[var(--bg-app)]/50 space-y-2">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <label className="text-xs font-bold text-[var(--text-main)] block">Specific Days Billing / Exclude Days</label>
+                    <span className="text-[10px] text-[var(--text-muted)]">Optionally set exact billable days (e.g. exclude Sundays or non-working days)</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={form.billable_days !== "" && form.billable_days !== null && form.billable_days !== undefined}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        const start = new Date(form.start_datetime || new Date());
+                        const end = new Date(form.expected_end_datetime || new Date());
+                        const days = Math.max(1, Math.ceil(Math.abs(end - start) / (1000 * 60 * 60 * 24)));
+                        setForm({ ...form, billable_days: days, specific_days_notes: "Excluding Sundays" });
+                      } else {
+                        setForm({ ...form, billable_days: "", specific_days_notes: "" });
+                      }
+                    }}
+                    className="h-4 w-4 rounded bg-transparent text-teal-650"
+                  />
+                </div>
+
+                {form.billable_days !== "" && form.billable_days !== null && form.billable_days !== undefined && (
+                  <div className="grid grid-cols-2 gap-3 pt-2 border-t border-[var(--border-color)]">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-[var(--text-muted)] mb-1">Custom Billable Days *</label>
+                      <input
+                        type="number"
+                        min="1"
+                        required
+                        value={form.billable_days}
+                        onChange={(e) => setForm({ ...form, billable_days: e.target.value })}
+                        className="w-full app-input rounded-lg p-2 text-xs font-bold font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-[var(--text-muted)] mb-1">Schedule Notes</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Excludes 2 Sundays"
+                        value={form.specific_days_notes || ""}
+                        onChange={(e) => setForm({ ...form, specific_days_notes: e.target.value })}
+                        className="w-full app-input rounded-lg p-2 text-xs"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {branding.feature_flags?.includes("chauffeur_module") && (
                 <div className="border-t border-[var(--border-color)] pt-4 space-y-3">
                   <div className="flex justify-between items-center">
@@ -4368,14 +4813,68 @@ function BookingsView({
                   </div>
                   
                   {form.is_chauffeur_driven && (
-                    <div>
-                      <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Driver Daily Wage (PKR)</label>
-                      <input 
-                        type="number"
-                        value={form.chauffeur_daily_wage}
-                        onChange={(e) => setForm({...form, chauffeur_daily_wage: parseFloat(e.target.value) || 0})}
-                        className="w-full app-input rounded-lg p-2.5"
-                      />
+                    <div className="p-3 rounded-xl border border-[var(--border-color)] bg-[var(--bg-app)]/50 space-y-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Driver Option</label>
+                        <select
+                          value={form.driver_type || "Company Driver"}
+                          onChange={(e) => setForm({ ...form, driver_type: e.target.value })}
+                          className="w-full app-input rounded-lg p-2 text-xs font-semibold"
+                        >
+                          <option value="Company Driver">Company Driver (Own Staff)</option>
+                          <option value="Freelance Driver">Freelance / External Driver</option>
+                        </select>
+                      </div>
+
+                      {form.driver_type === "Freelance Driver" && (
+                        <div className="space-y-2 border-t border-[var(--border-color)] pt-2">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-teal-600 dark:text-teal-400">Freelance Driver Particulars</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-[10px] font-semibold text-[var(--text-muted)] mb-1">Freelance Driver Name *</label>
+                              <input
+                                type="text"
+                                placeholder="Full Name"
+                                value={form.driver_name || ""}
+                                onChange={(e) => setForm({ ...form, driver_name: e.target.value })}
+                                className="w-full app-input rounded-lg p-2 text-xs"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-semibold text-[var(--text-muted)] mb-1">Freelance Driver Phone</label>
+                              <input
+                                type="text"
+                                placeholder="03001234567"
+                                value={form.driver_phone || ""}
+                                onChange={(e) => setForm({ ...form, driver_phone: e.target.value })}
+                                className="w-full app-input rounded-lg p-2 text-xs font-mono"
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-[var(--text-muted)] mb-1">Freelance Driver CNIC</label>
+                            <input
+                              type="text"
+                              placeholder="35201xxxxxxx"
+                              value={form.driver_cnic || ""}
+                              onChange={(e) => setForm({ ...form, driver_cnic: e.target.value })}
+                              className="w-full app-input rounded-lg p-2 text-xs font-mono"
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      <div>
+                        <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                          {form.driver_type === "Freelance Driver" ? "Freelance Daily Wage / Rate (PKR)" : "Driver Daily Wage / Allowance (PKR)"}
+                        </label>
+                        <input 
+                          type="number"
+                          value={form.chauffeur_daily_wage}
+                          onChange={(e) => setForm({...form, chauffeur_daily_wage: parseFloat(e.target.value) || 0})}
+                          className="w-full app-input rounded-lg p-2.5 text-xs font-mono"
+                        />
+                      </div>
                     </div>
                   )}
                 </div>
@@ -4422,7 +4921,7 @@ function BookingsView({
                 disabled={!!blacklistWarning}
                 className="w-full btn-accent text-white font-semibold py-3 rounded-lg mt-4 transition-all"
               >
-                Book Rental Package
+                {editingBookingId ? "Save Booking Changes" : "Book Rental Package"}
               </button>
             </form>
           </div>

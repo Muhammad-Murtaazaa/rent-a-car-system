@@ -1039,3 +1039,74 @@ def delete_official_letter(db: Session, letter_id: int, tenant_id: str):
         db.commit()
     return db_ltr
 
+
+# --- Supplier Deals (Sublet / Sourcing) CRUD ---
+def get_supplier_deals(db: Session, tenant_id: str, skip: int = 0, limit: int = 1000):
+    return (
+        db.query(models.SupplierDeal)
+        .filter(models.SupplierDeal.tenant_id == tenant_id)
+        .order_by(models.SupplierDeal.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+def get_supplier_deal(db: Session, deal_id: int, tenant_id: str):
+    return db.query(models.SupplierDeal).filter(models.SupplierDeal.id == deal_id, models.SupplierDeal.tenant_id == tenant_id).first()
+
+def create_supplier_deal(db: Session, deal: schemas.SupplierDealCreate, tenant_id: str):
+    data = deal.dict()
+    # Ensure calculated fields are accurate
+    client_rent = data.get("client_total_rent") or 0.0
+    supp_cost = data.get("supplier_total_cost") or 0.0
+    driver_exp = data.get("driver_expense") or 0.0
+    fuel_exp = data.get("fuel_expense") or 0.0
+    other_exp = data.get("other_expense") or 0.0
+    tot_exp = driver_exp + fuel_exp + other_exp
+    data["total_expenses"] = tot_exp
+    data["commission_amount"] = round(client_rent - supp_cost, 2)
+    data["net_cash_profit"] = round(data["commission_amount"] - tot_exp, 2)
+    client_rec = data.get("client_received_amount") or 0.0
+    data["client_remaining_balance"] = round(max(0.0, client_rent - client_rec), 2)
+    supp_paid = data.get("supplier_paid_amount") or 0.0
+    data["supplier_remaining_payable"] = round(max(0.0, supp_cost - supp_paid), 2)
+
+    db_deal = models.SupplierDeal(**data, tenant_id=tenant_id)
+    db.add(db_deal)
+    db.commit()
+    db.refresh(db_deal)
+    return db_deal
+
+def update_supplier_deal(db: Session, deal_id: int, deal_update: schemas.SupplierDealUpdate, tenant_id: str):
+    db_deal = get_supplier_deal(db, deal_id, tenant_id)
+    if not db_deal:
+        return None
+    for k, v in deal_update.dict(exclude_unset=True).items():
+        setattr(db_deal, k, v)
+    
+    # Recalculate
+    client_rent = db_deal.client_total_rent or 0.0
+    supp_cost = db_deal.supplier_total_cost or 0.0
+    driver_exp = db_deal.driver_expense or 0.0
+    fuel_exp = db_deal.fuel_expense or 0.0
+    other_exp = db_deal.other_expense or 0.0
+    tot_exp = driver_exp + fuel_exp + other_exp
+    db_deal.total_expenses = tot_exp
+    db_deal.commission_amount = round(client_rent - supp_cost, 2)
+    db_deal.net_cash_profit = round(db_deal.commission_amount - tot_exp, 2)
+    client_rec = db_deal.client_received_amount or 0.0
+    db_deal.client_remaining_balance = round(max(0.0, client_rent - client_rec), 2)
+    supp_paid = db_deal.supplier_paid_amount or 0.0
+    db_deal.supplier_remaining_payable = round(max(0.0, supp_cost - supp_paid), 2)
+
+    db.commit()
+    db.refresh(db_deal)
+    return db_deal
+
+def delete_supplier_deal(db: Session, deal_id: int, tenant_id: str):
+    db_deal = get_supplier_deal(db, deal_id, tenant_id)
+    if db_deal:
+        db.delete(db_deal)
+        db.commit()
+    return db_deal
+

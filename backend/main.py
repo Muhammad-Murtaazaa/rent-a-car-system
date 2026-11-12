@@ -2,6 +2,7 @@ import os
 import shutil
 import time
 import uuid
+import json
 import threading
 import urllib.request
 from datetime import datetime, date, timedelta
@@ -59,10 +60,17 @@ def ensure_sqlite_columns():
             ("guarantor2_cnic", "VARCHAR"),
             ("guarantor2_address", "VARCHAR"),
             ("guarantee_details", "VARCHAR"),
+            ("extra_documents", "JSON"),
         ],
         "bookings": [
             ("booking_type", "VARCHAR"),
             ("company_name", "VARCHAR"),
+            ("driver_type", "VARCHAR DEFAULT 'Company Driver'"),
+            ("driver_name", "VARCHAR"),
+            ("driver_phone", "VARCHAR"),
+            ("driver_cnic", "VARCHAR"),
+            ("billable_days", "INTEGER"),
+            ("specific_days_notes", "VARCHAR"),
         ],
         "investors": [
             ("payout_type", "VARCHAR DEFAULT 'percentage'"),
@@ -646,6 +654,20 @@ def read_customer_by_cnic(cnic: str, db: Session = Depends(get_db), tenant_conte
         raise HTTPException(status_code=404, detail="Customer not found")
     return db_customer
 
+@app.post("/api/customers/upload-document")
+def upload_customer_document(
+    file: UploadFile = File(...),
+    title: str = Form("Document"),
+    db: Session = Depends(get_db),
+    tenant_context: dict = Depends(get_tenant_context)
+):
+    path = upload_file_securely(file)
+    return {
+        "title": title,
+        "file_path": path,
+        "filename": file.filename,
+    }
+
 @app.post("/api/customers", response_model=schemas.Customer)
 def create_customer(
     full_name: str = Form(...),
@@ -666,6 +688,7 @@ def create_customer(
     guarantor2_cnic: Optional[str] = Form(None),
     guarantor2_address: Optional[str] = Form(None),
     guarantee_details: Optional[str] = Form(None),
+    extra_documents: Optional[str] = Form(None),
     cnic_front: Optional[UploadFile] = File(None),
     cnic_back: Optional[UploadFile] = File(None),
     license_front: Optional[UploadFile] = File(None),
@@ -690,6 +713,13 @@ def create_customer(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid license_expiry_date (use YYYY-MM-DD)")
 
+    parsed_extra_docs = None
+    if extra_documents:
+        try:
+            parsed_extra_docs = json.loads(extra_documents)
+        except Exception:
+            parsed_extra_docs = []
+
     customer_schema = schemas.CustomerCreate(
         full_name=full_name,
         phone_primary=phone_primary,
@@ -712,6 +742,7 @@ def create_customer(
         guarantor2_cnic=guarantor2_cnic or None,
         guarantor2_address=guarantor2_address or None,
         guarantee_details=guarantee_details or None,
+        extra_documents=parsed_extra_docs,
     )
     return crud.create_customer(db=db, customer=customer_schema, tenant_id=tenant_id)
 
@@ -736,6 +767,7 @@ def update_customer(
     guarantor2_cnic: Optional[str] = Form(None),
     guarantor2_address: Optional[str] = Form(None),
     guarantee_details: Optional[str] = Form(None),
+    extra_documents: Optional[str] = Form(None),
     cnic_front: Optional[UploadFile] = File(None),
     cnic_back: Optional[UploadFile] = File(None),
     license_front: Optional[UploadFile] = File(None),
@@ -778,6 +810,12 @@ def update_customer(
             raise HTTPException(status_code=400, detail="Invalid license_expiry_date (use YYYY-MM-DD)")
     else:
         update_data["license_expiry_date"] = None
+
+    if extra_documents is not None:
+        try:
+            update_data["extra_documents"] = json.loads(extra_documents)
+        except Exception:
+            update_data["extra_documents"] = []
 
     if cnic_front:
         update_data["cnic_front_path"] = upload_file_securely(cnic_front)
@@ -1399,6 +1437,31 @@ def delete_official_letter(letter_id: int, db: Session = Depends(get_db), tenant
     if not deleted:
         raise HTTPException(status_code=404, detail="Letter not found")
     return {"message": "Letter deleted successfully"}
+
+
+# --- Supplier Deals (Sublet / Sourcing) Endpoints ---
+@app.get("/api/supplier-deals", response_model=List[schemas.SupplierDeal])
+def list_supplier_deals(skip: int = 0, limit: int = 1000, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    return crud.get_supplier_deals(db, tenant_id=tenant_context["tenant_id"], skip=skip, limit=limit)
+
+@app.post("/api/supplier-deals", response_model=schemas.SupplierDeal)
+def create_supplier_deal(deal: schemas.SupplierDealCreate, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    return crud.create_supplier_deal(db, deal=deal, tenant_id=tenant_context["tenant_id"])
+
+@app.put("/api/supplier-deals/{deal_id}", response_model=schemas.SupplierDeal)
+def update_supplier_deal(deal_id: int, deal_update: schemas.SupplierDealUpdate, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    updated = crud.update_supplier_deal(db, deal_id=deal_id, deal_update=deal_update, tenant_id=tenant_context["tenant_id"])
+    if not updated:
+        raise HTTPException(status_code=404, detail="Supplier deal not found")
+    return updated
+
+@app.delete("/api/supplier-deals/{deal_id}")
+def delete_supplier_deal(deal_id: int, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    deleted = crud.delete_supplier_deal(db, deal_id=deal_id, tenant_id=tenant_context["tenant_id"])
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Supplier deal not found")
+    return {"message": "Supplier deal deleted successfully"}
+
 
 
 # --- Serve React Frontend SPA build ---

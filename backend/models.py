@@ -93,6 +93,7 @@ class Customer(Base):
     guarantor2_cnic = Column(String, nullable=True)
     guarantor2_address = Column(String, nullable=True)
     guarantee_details = Column(String, nullable=True)
+    extra_documents = Column(JSON, nullable=True, default=list)
 
     bookings = relationship("Booking", back_populates="customer")
 
@@ -115,6 +116,12 @@ class Booking(Base):
     status = Column(String, nullable=False, default="Active")  # Active, Reserved, Completed, Cancelled
     booking_type = Column(String, nullable=False, default="Individual")  # Individual, Company
     company_name = Column(String, nullable=True)
+    driver_type = Column(String, nullable=True, default="Company Driver")  # Company Driver, Freelance Driver
+    driver_name = Column(String, nullable=True)
+    driver_phone = Column(String, nullable=True)
+    driver_cnic = Column(String, nullable=True)
+    billable_days = Column(Integer, nullable=True)
+    specific_days_notes = Column(String, nullable=True)
 
     car = relationship("Car", back_populates="bookings")
     customer = relationship("Customer", back_populates="bookings")
@@ -355,5 +362,39 @@ class Receipt(Base):
     payment_method = Column(String, nullable=False, default="Cash")
     reference_no = Column(String, nullable=True)
     receipt_date = Column(Date, nullable=False)
+    notes = Column(String, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+class SupplierDeal(Base):
+    __tablename__ = "supplier_deals"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(String, nullable=False, index=True, default="default")
+    supplier_name = Column(String, nullable=False)
+    supplier_phone = Column(String, nullable=False)
+    supplier_cnic = Column(String, nullable=True)
+    car_make_model = Column(String, nullable=False)
+    car_plate_number = Column(String, nullable=False)
+    car_color = Column(String, nullable=True)
+    customer_name = Column(String, nullable=False)
+    customer_phone = Column(String, nullable=False)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    days = Column(Integer, nullable=False, default=1)
+    supplier_daily_rate = Column(Float, nullable=False, default=0.0)
+    supplier_total_cost = Column(Float, nullable=False, default=0.0)
+    client_daily_rate = Column(Float, nullable=False, default=0.0)
+    client_total_rent = Column(Float, nullable=False, default=0.0)
+    commission_amount = Column(Float, nullable=False, default=0.0)
+    driver_expense = Column(Float, nullable=False, default=0.0)
+    fuel_expense = Column(Float, nullable=False, default=0.0)
+    other_expense = Column(Float, nullable=False, default=0.0)
+    total_expenses = Column(Float, nullable=False, default=0.0)
+    net_cash_profit = Column(Float, nullable=False, default=0.0)
+    client_received_amount = Column(Float, nullable=False, default=0.0)
+    client_remaining_balance = Column(Float, nullable=False, default=0.0)
+    supplier_paid_amount = Column(Float, nullable=False, default=0.0)
+    supplier_remaining_payable = Column(Float, nullable=False, default=0.0)
+    status = Column(String, nullable=False, default="Active")  # Active, Completed, Pending Payment, Cancelled
     notes = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)

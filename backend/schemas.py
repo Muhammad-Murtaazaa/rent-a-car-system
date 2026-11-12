@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime, date
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 
 # Cars
 class CarBase(BaseModel):
@@ -82,6 +82,7 @@ class CustomerBase(BaseModel):
     guarantor2_cnic: Optional[str] = None
     guarantor2_address: Optional[str] = None
     guarantee_details: Optional[str] = None
+    extra_documents: Optional[Any] = None
 
     @field_validator('cnic_number')
     @classmethod
@@ -116,6 +117,7 @@ class CustomerUpdate(BaseModel):
     guarantor2_cnic: Optional[str] = None
     guarantor2_address: Optional[str] = None
     guarantee_details: Optional[str] = None
+    extra_documents: Optional[Any] = None
 
 class Customer(CustomerBase):
     id: int
@@ -161,6 +163,12 @@ class BookingBase(BaseModel):
     status: str = "Active"  # Active, Reserved, Completed, Cancelled
     booking_type: Optional[str] = "Individual"  # Individual, Company
     company_name: Optional[str] = None
+    driver_type: Optional[str] = "Company Driver"  # Company Driver, Freelance Driver
+    driver_name: Optional[str] = None
+    driver_phone: Optional[str] = None
+    driver_cnic: Optional[str] = None
+    billable_days: Optional[int] = None
+    specific_days_notes: Optional[str] = None
 
 class BookingCreate(BookingBase):
     booked_cars: Optional[List[BookedCarCreate]] = None
@@ -180,6 +188,12 @@ class BookingUpdate(BaseModel):
     status: Optional[str] = None
     booking_type: Optional[str] = None
     company_name: Optional[str] = None
+    driver_type: Optional[str] = None
+    driver_name: Optional[str] = None
+    driver_phone: Optional[str] = None
+    driver_cnic: Optional[str] = None
+    billable_days: Optional[int] = None
+    specific_days_notes: Optional[str] = None
     booked_cars: Optional[List[BookedCarCreate]] = None
 
 class Booking(BookingBase):
@@ -726,3 +740,74 @@ class TenantSelfBrandingUpdate(BaseModel):
     logo_url: Optional[str] = None
     primary_theme_color: Optional[str] = None
     branding_settings: Optional[Dict[str, str]] = None
+
+
+# Supplier Deals (Sublet / Third-Party Fleet Sourcing)
+class SupplierDealBase(BaseModel):
+    supplier_name: str
+    supplier_phone: str
+    supplier_cnic: Optional[str] = None
+    car_make_model: str
+    car_plate_number: str
+    car_color: Optional[str] = None
+    customer_name: str
+    customer_phone: str
+    start_date: date
+    end_date: date
+    days: int = 1
+    supplier_daily_rate: float = 0.0
+    supplier_total_cost: float = 0.0
+    client_daily_rate: float = 0.0
+    client_total_rent: float = 0.0
+    commission_amount: float = 0.0
+    driver_expense: float = 0.0
+    fuel_expense: float = 0.0
+    other_expense: float = 0.0
+    total_expenses: float = 0.0
+    net_cash_profit: float = 0.0
+    client_received_amount: float = 0.0
+    client_remaining_balance: float = 0.0
+    supplier_paid_amount: float = 0.0
+    supplier_remaining_payable: float = 0.0
+    status: str = "Active"
+    notes: Optional[str] = None
+
+class SupplierDealCreate(SupplierDealBase):
+    pass
+
+class SupplierDealUpdate(BaseModel):
+    supplier_name: Optional[str] = None
+    supplier_phone: Optional[str] = None
+    supplier_cnic: Optional[str] = None
+    car_make_model: Optional[str] = None
+    car_plate_number: Optional[str] = None
+    car_color: Optional[str] = None
+    customer_name: Optional[str] = None
+    customer_phone: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    days: Optional[int] = None
+    supplier_daily_rate: Optional[float] = None
+    supplier_total_cost: Optional[float] = None
+    client_daily_rate: Optional[float] = None
+    client_total_rent: Optional[float] = None
+    commission_amount: Optional[float] = None
+    driver_expense: Optional[float] = None
+    fuel_expense: Optional[float] = None
+    other_expense: Optional[float] = None
+    total_expenses: Optional[float] = None
+    net_cash_profit: Optional[float] = None
+    client_received_amount: Optional[float] = None
+    client_remaining_balance: Optional[float] = None
+    supplier_paid_amount: Optional[float] = None
+    supplier_remaining_payable: Optional[float] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+
+class SupplierDeal(SupplierDealBase):
+    id: int
+    tenant_id: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

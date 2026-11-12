@@ -7,7 +7,7 @@ import {
 const ALL_FLAGS = [
   "dashboard", "fleet", "customers", "leads", "quotations",
   "bookings", "receipts", "employees", "maintenance", "blacklist",
-  "whatsapp_api", "advanced_analytics", "chauffeur_module"
+  "whatsapp_api", "advanced_analytics", "chauffeur_module", "suppliers"
 ];
 
 function calcDaysLeft(trialEndsAt) {
@@ -749,7 +749,8 @@ export default function SuperAdminDashboard({ userRole, setUserRole }) {
                     { flag: "blacklist", label: "Blacklist Shield", desc: "High-risk CNIC blocklist" },
                     { flag: "whatsapp_api", label: "WhatsApp Messaging", desc: "Direct WhatsApp receipts, quotes & follow-ups" },
                     { flag: "advanced_analytics", label: "Vehicle Lifecycle Analytics", desc: "Revenue charts and profit reports" },
-                    { flag: "chauffeur_module", label: "Chauffeur Rental Module", desc: "Chauffeur daily wage calculations" }
+                    { flag: "chauffeur_module", label: "Chauffeur Rental Module", desc: "Chauffeur daily wage calculations" },
+                    { flag: "suppliers", label: "Suppliers & Sublet Deals", desc: "Outsourced cars, supplier rent costs, client markups & net profit" }
                   ].map(mod => {
                     const isEnabled = (selectedTenant.feature_flags || []).includes(mod.flag);
                     return (

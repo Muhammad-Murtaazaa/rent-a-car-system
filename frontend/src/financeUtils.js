@@ -193,7 +193,8 @@ export function estimatedBookingCharge(booking) {
   const end = parseDate(booking.actual_return_datetime || booking.expected_end_datetime);
   if (!start || !end) return 0;
   const ms = end.getTime() - start.getTime();
-  const days = Math.max(1, Math.ceil(ms / 86400000));
+  const autoDays = Math.max(1, Math.ceil(ms / 86400000));
+  const days = booking.billable_days && booking.billable_days > 0 ? booking.billable_days : autoDays;
   let total = days * (Number(booking.daily_rate) || 0);
   if (booking.is_chauffeur_driven) {
     total += days * (Number(booking.chauffeur_daily_wage) || 0);
