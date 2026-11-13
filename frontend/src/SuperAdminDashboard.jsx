@@ -246,10 +246,10 @@ export default function SuperAdminDashboard({ userRole, setUserRole, onLoginAsTe
           tenant: data.tenant || payload,
           credentials: data.credentials ? {
             ...data.credentials,
-            login_url: payload.id === "default" ? "https://racms.omnysync.com" : `https://racms.omnysync.com/?tenant=${payload.id}`
+            login_url: `https://${payload.id === "default" ? "racms" : payload.id}.omnysync.com`
           } : {
             subdomain: payload.id,
-            login_url: payload.id === "default" ? "https://racms.omnysync.com" : `https://racms.omnysync.com/?tenant=${payload.id}`,
+            login_url: `https://${payload.id === "default" ? "racms" : payload.id}.omnysync.com`,
             username: payload.admin_username,
             password: payload.admin_password,
             email: payload.admin_email
@@ -635,23 +635,16 @@ export default function SuperAdminDashboard({ userRole, setUserRole, onLoginAsTe
                           </div>
                         </div>
                       </td>
-                      <td className="p-4">
-                        <div className="flex flex-col gap-0.5">
-                          <a
-                            href={t.id === "default" ? "https://racms.omnysync.com" : `https://racms.omnysync.com/?tenant=${t.id}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-teal-400 font-bold inline-flex items-center gap-1 hover:underline text-xs"
-                          >
-                            {t.id === "default" ? "racms.omnysync.com" : `racms.omnysync.com/?tenant=${t.id}`}
-                            <ExternalLink className="h-3 w-3" />
-                          </a>
-                          {t.id !== "default" && (
-                            <span className="text-[10px] text-[var(--text-muted)] font-mono">
-                              subdomain: {t.id}.omnysync.com
-                            </span>
-                          )}
-                        </div>
+                      <td className="p-4 font-mono">
+                        <a
+                          href={`https://${t.id === "default" ? "racms" : t.id}.omnysync.com`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-teal-400 font-bold inline-flex items-center gap-1 hover:underline text-xs"
+                        >
+                          {t.id === "default" ? "racms" : t.id}.omnysync.com
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
                       </td>
                       <td className="p-4">
                         <div className="font-bold capitalize text-[var(--text-main)]">
@@ -823,7 +816,7 @@ export default function SuperAdminDashboard({ userRole, setUserRole, onLoginAsTe
                   />
                 </div>
                 <span className="text-[10px] text-[var(--text-muted)] mt-1 block">
-                  Live Portal: <strong className="text-teal-400">https://racms.omnysync.com/?tenant={newTenantForm.id || "subdomain"}</strong>
+                  Dedicated Subdomain: <strong className="text-teal-400">https://{newTenantForm.id || "subdomain"}.omnysync.com</strong>
                 </span>
               </div>
 
@@ -957,14 +950,14 @@ export default function SuperAdminDashboard({ userRole, setUserRole, onLoginAsTe
                 <span className="font-bold font-sans text-sm text-[var(--text-main)]">{provisionedHandoff.tenant.name}</span>
               </div>
               <div className="flex justify-between items-center py-1 border-b border-[var(--border-color)]">
-                <span className="text-[var(--text-muted)]">Web Portal URL:</span>
+                <span className="text-[var(--text-muted)]">Subdomain Portal:</span>
                 <a
-                  href={provisionedHandoff.credentials.login_url || `https://racms.omnysync.com/?tenant=${provisionedHandoff.tenant.id}`}
+                  href={provisionedHandoff.credentials.login_url || `https://${provisionedHandoff.tenant.id}.omnysync.com`}
                   target="_blank"
                   rel="noreferrer"
                   className="font-bold text-teal-400 hover:underline"
                 >
-                  {provisionedHandoff.credentials.login_url || `https://racms.omnysync.com/?tenant=${provisionedHandoff.tenant.id}`}
+                  {provisionedHandoff.credentials.login_url || `https://${provisionedHandoff.tenant.id}.omnysync.com`}
                 </a>
               </div>
               <div className="flex justify-between items-center py-1 border-b border-[var(--border-color)]">
