@@ -44,10 +44,41 @@ export default function App() {
   const [theme, setTheme] = useState("dark");
   const [activeTab, setActiveTab] = useState("dashboard");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const isDedicatedTenantHost = typeof window !== "undefined" &&
+    window.location.hostname !== "racms.omnysync.com" &&
+    window.location.hostname !== "localhost" &&
+    window.location.hostname !== "127.0.0.1" &&
+    !window.location.hostname.startsWith("13.140.");
+
+  const activeTenantId = (typeof window !== "undefined" && localStorage.getItem("active_tenant_id")) || "default";
+  const isTenantWorkspace = isDedicatedTenantHost || activeTenantId !== "default";
+
+  const tenantUser = (() => {
+    try {
+      const u = typeof window !== "undefined" && localStorage.getItem("tenant_user");
+      return u ? JSON.parse(u) : null;
+    } catch {
+      return null;
+    }
+  })();
+
   const [userRole, setUserRole] = useState(() => {
-    if (typeof window !== "undefined" && (window.location.hash === "#admin" || window.location.pathname === "/admin")) {
+    const isDedicatedHost = typeof window !== "undefined" &&
+      window.location.hostname !== "racms.omnysync.com" &&
+      window.location.hostname !== "localhost" &&
+      window.location.hostname !== "127.0.0.1" &&
+      !window.location.hostname.startsWith("13.140.");
+
+    if (!isDedicatedHost && typeof window !== "undefined" && (window.location.hash === "#admin" || window.location.pathname === "/admin")) {
       return "super_admin";
     }
+    try {
+      const stored = localStorage.getItem("tenant_user");
+      if (stored) {
+        const u = JSON.parse(stored);
+        if (u.role) return u.role;
+      }
+    } catch {}
     return "tenant_admin";
   });
   const [showHistoryModal, setShowHistoryModal] = useState(false);
@@ -68,11 +99,12 @@ export default function App() {
     setTenantLoggingIn(true);
     setTenantLoginError("");
     try {
+      const targetTenantId = (isDedicatedTenantHost ? activeTenantId : tenantLoginForm.tenant_id).trim().toLowerCase();
       const res = await fetch("/api/auth/tenant-login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          tenant_id: tenantLoginForm.tenant_id.trim().toLowerCase(),
+          tenant_id: targetTenantId,
           username: tenantLoginForm.username.trim(),
           password: tenantLoginForm.password.trim()
         })
@@ -98,7 +130,9 @@ export default function App() {
   const handleTenantLogout = () => {
     localStorage.removeItem("tenant_token");
     localStorage.removeItem("tenant_user");
-    localStorage.setItem("active_tenant_id", "default");
+    if (!isDedicatedTenantHost) {
+      localStorage.setItem("active_tenant_id", "default");
+    }
     window.location.reload();
   };
   
@@ -527,9 +561,11 @@ export default function App() {
             >
               Contact Support to Activate
             </a>
-            <button onClick={() => setUserRole("super_admin")} className="text-[11px] text-[var(--text-muted)] hover:underline pt-2">
-              SaaS Operator Login
-            </button>
+            {!isDedicatedTenantHost && (
+              <button onClick={() => setUserRole("super_admin")} className="text-[11px] text-[var(--text-muted)] hover:underline pt-2">
+                SaaS Operator Login
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -723,57 +759,103 @@ export default function App() {
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-teal-500/15 text-teal-400 font-bold border border-teal-500/25">Setup</span>
           </button>
 
-          <div className="text-left">
-            <label className="block text-[11px] font-medium text-[var(--text-muted)] mb-1.5">Role</label>
-            <select
-              value={userRole}
-              onChange={(e) => setUserRole(e.target.value)}
-              className="w-full app-input rounded-lg px-2.5 py-2 text-xs font-medium focus:outline-none"
-            >
-              <option value="tenant_admin">Tenant Admin</option>
-              <option value="desk_staff">Desk Staff</option>
-              <option value="super_admin">Super Admin</option>
-            </select>
-          </div>
-
-          {/* Active Tenant Scope & Authentication Card */}
-          <div className="p-2.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-app)] text-left space-y-1.5">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] uppercase font-bold text-[var(--text-muted)] tracking-wider">Tenant Scope</span>
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-teal-500/10 text-teal-400 font-bold border border-teal-500/20">
-                {(typeof window !== "undefined" && localStorage.getItem("active_tenant_id")) || "default"}
-              </span>
-            </div>
-            <div className="font-bold text-xs truncate text-[var(--text-main)]">
-              {branding.name || "Agency Workspace"}
-            </div>
-            <div className="flex items-center gap-1.5 pt-0.5">
+          {/* Tenant View: Clean, professional user identity (No Role selector or Multi-Tenant Scope cards) */}
+          {isTenantWorkspace ? (
+            tenantUser ? (
+              <div className="flex items-center justify-between px-3 py-2 rounded-xl border border-[var(--border-color)] bg-[var(--bg-app)] text-xs">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-7 h-7 rounded-lg bg-teal-500/15 border border-teal-500/25 text-teal-400 font-bold flex items-center justify-center text-xs shrink-0">
+                    {(tenantUser.full_name || tenantUser.username || "A")[0].toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="font-semibold text-xs truncate text-[var(--text-main)] leading-tight">
+                      {tenantUser.full_name || tenantUser.username || "Staff User"}
+                    </div>
+                    <div className="text-[10px] text-[var(--text-muted)] truncate capitalize">
+                      {tenantUser.role === "desk_staff" ? "Desk Staff" : "Tenant Admin"}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleTenantLogout}
+                  title="Sign Out"
+                  className="text-[10px] font-bold text-rose-400 hover:text-rose-300 px-2 py-1 rounded-lg bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500/20 transition-all shrink-0 ml-1.5"
+                >
+                  Sign Out
+                </button>
+              </div>
+            ) : (
               <button
                 type="button"
                 onClick={() => {
                   setTenantLoginForm({
-                    tenant_id: (typeof window !== "undefined" && localStorage.getItem("active_tenant_id")) || "default",
+                    tenant_id: activeTenantId,
                     username: "",
                     password: ""
                   });
                   setShowTenantLoginModal(true);
                 }}
-                className="w-full py-1 px-2 rounded-lg bg-[var(--tr-hover)] hover:bg-teal-500/10 hover:text-teal-400 border border-[var(--border-color)] text-[10px] font-bold text-center transition-colors"
+                className="w-full py-2 px-3 rounded-xl bg-teal-500/10 hover:bg-teal-500/20 border border-teal-500/25 text-teal-400 text-xs font-bold text-center transition-all flex items-center justify-center gap-1.5"
               >
-                🔑 Login / Switch Tenant
+                <span>🔐</span> Staff Sign In
               </button>
-              {(typeof window !== "undefined" && localStorage.getItem("tenant_token")) && (
-                <button
-                  type="button"
-                  onClick={handleTenantLogout}
-                  title="Log out of this tenant"
-                  className="py-1 px-2 rounded-lg border border-rose-500/20 text-rose-500 hover:bg-rose-500/10 text-[10px] font-bold shrink-0"
+            )
+          ) : (
+            /* Operator / Platform Demo View (only visible on racms.omnysync.com root default workspace) */
+            <>
+              <div className="text-left">
+                <label className="block text-[11px] font-medium text-[var(--text-muted)] mb-1.5">Role</label>
+                <select
+                  value={userRole}
+                  onChange={(e) => setUserRole(e.target.value)}
+                  className="w-full app-input rounded-lg px-2.5 py-2 text-xs font-medium focus:outline-none"
                 >
-                  Exit
-                </button>
-              )}
-            </div>
-          </div>
+                  <option value="tenant_admin">Tenant Admin</option>
+                  <option value="desk_staff">Desk Staff</option>
+                  <option value="super_admin">Super Admin</option>
+                </select>
+              </div>
+
+              <div className="p-2.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-app)] text-left space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] uppercase font-bold text-[var(--text-muted)] tracking-wider">Tenant Scope</span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-teal-500/10 text-teal-400 font-bold border border-teal-500/20">
+                    {activeTenantId}
+                  </span>
+                </div>
+                <div className="font-bold text-xs truncate text-[var(--text-main)]">
+                  {branding.name || "Agency Workspace"}
+                </div>
+                <div className="flex items-center gap-1.5 pt-0.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTenantLoginForm({
+                        tenant_id: activeTenantId,
+                        username: "",
+                        password: ""
+                      });
+                      setShowTenantLoginModal(true);
+                    }}
+                    className="w-full py-1 px-2 rounded-lg bg-[var(--tr-hover)] hover:bg-teal-500/10 hover:text-teal-400 border border-[var(--border-color)] text-[10px] font-bold text-center transition-colors"
+                  >
+                    🔑 Login / Switch Tenant
+                  </button>
+                  {localStorage.getItem("tenant_token") && (
+                    <button
+                      type="button"
+                      onClick={handleTenantLogout}
+                      title="Log out of this tenant"
+                      className="py-1 px-2 rounded-lg border border-rose-500/20 text-rose-500 hover:bg-rose-500/10 text-[10px] font-bold shrink-0"
+                    >
+                      Exit
+                    </button>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
           {/* PWA Offline & Sync Indicator */}
           <div className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-app)] text-[11px]">
             <div className="flex items-center gap-1.5 min-w-0">
@@ -1260,8 +1342,12 @@ export default function App() {
             <div className="glass-panel w-full max-w-md rounded-2xl p-6 shadow-2xl space-y-5 border border-[var(--border-color)] animate-scale-up">
               <div className="flex justify-between items-center pb-3 border-b border-[var(--border-color)]">
                 <div>
-                  <h3 className="font-bold text-lg text-[var(--text-main)]">Agency Workspace Login</h3>
-                  <p className="text-xs text-[var(--text-muted)]">Sign in with your tenant subdomain and credentials</p>
+                  <h3 className="font-bold text-lg text-[var(--text-main)]">
+                    {isDedicatedTenantHost ? (branding.name || "Staff Login") : "Agency Workspace Login"}
+                  </h3>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    {isDedicatedTenantHost ? "Sign in with your staff or administrator account" : "Sign in with your tenant subdomain and credentials"}
+                  </p>
                 </div>
                 <button
                   type="button"
@@ -1273,20 +1359,30 @@ export default function App() {
               </div>
 
               <form onSubmit={handleTenantLoginSubmit} className="space-y-4 text-xs">
-                <div>
-                  <label className="block font-semibold text-[var(--text-muted)] mb-1">Tenant Subdomain / ID *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. azeem or default"
-                    value={tenantLoginForm.tenant_id}
-                    onChange={(e) => setTenantLoginForm({ ...tenantLoginForm, tenant_id: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "") })}
-                    className="w-full app-input rounded-xl p-2.5 font-mono text-sm focus:outline-none"
-                  />
-                  <span className="text-[10px] text-[var(--text-muted)] mt-1 block">
-                    URL: {tenantLoginForm.tenant_id || "agency"}.racms.omnysync.com
-                  </span>
-                </div>
+                {isDedicatedTenantHost ? (
+                  <div className="flex items-center gap-2.5 p-2.5 rounded-xl bg-teal-500/10 border border-teal-500/20 text-xs text-[var(--text-main)]">
+                    <span className="text-base">🏢</span>
+                    <div className="min-w-0">
+                      <div className="font-bold truncate">{branding.name || "Agency Workspace"}</div>
+                      <div className="text-[10px] text-teal-400 font-mono truncate">{activeTenantId}.omnysync.com</div>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block font-semibold text-[var(--text-muted)] mb-1">Tenant Subdomain / ID *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. azeem or default"
+                      value={tenantLoginForm.tenant_id}
+                      onChange={(e) => setTenantLoginForm({ ...tenantLoginForm, tenant_id: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "") })}
+                      className="w-full app-input rounded-xl p-2.5 font-mono text-sm focus:outline-none"
+                    />
+                    <span className="text-[10px] text-[var(--text-muted)] mt-1 block">
+                      URL: {tenantLoginForm.tenant_id || "agency"}.racms.omnysync.com
+                    </span>
+                  </div>
+                )}
 
                 <div>
                   <label className="block font-semibold text-[var(--text-muted)] mb-1">Username / Email *</label>
