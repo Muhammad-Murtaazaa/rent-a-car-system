@@ -273,6 +273,28 @@ def caddy_check_domain(domain: str = Query(...), db: Session = Depends(get_db)):
 
     raise HTTPException(status_code=404, detail="Domain not authorized for on-demand TLS")
 
+def sync_caddy_tenants(db: Session):
+    """
+    Automatically writes all active tenant subdomains to /etc/caddy/tenants.caddy
+    and reloads Caddy with zero downtime so every tenant subdomain is instantly live.
+    """
+    try:
+        caddy_dir = "/etc/caddy"
+        if not os.path.exists(caddy_dir):
+            return
+        tenants = db.query(models.Tenant).filter(models.Tenant.id != "default", models.Tenant.is_active == True).all()
+        blocks = []
+        for t in tenants:
+            domain = f"{t.id}.omnysync.com"
+            blocks.append(f"{domain} {{\n\treverse_proxy 127.0.0.1:8080\n}}")
+        content = "\n\n".join(blocks)
+        caddy_path = os.path.join(caddy_dir, "tenants.caddy")
+        with open(caddy_path, "w") as f:
+            f.write(content + "\n")
+        os.system("caddy reload --config /etc/caddy/Caddyfile >/dev/null 2>&1")
+    except Exception as e:
+        print("[CaddySync] Error:", e)
+
 @app.on_event("startup")
 def startup_event():
     run_db_backup()
@@ -280,6 +302,12 @@ def startup_event():
     t.start()
     keep_alive_t = threading.Thread(target=keep_alive_scheduler, daemon=True)
     keep_alive_t.start()
+    try:
+        from backend.database import SessionLocal
+        with SessionLocal() as db:
+            sync_caddy_tenants(db)
+    except Exception as e:
+        print("[Startup CaddySync Error]:", e)
 
 @app.on_event("shutdown")
 def shutdown_event():
@@ -1171,6 +1199,9 @@ def provision_tenant(
     db.add(user)
     db.commit()
 
+    # Automatically register subdomain in Caddy & reload
+    sync_caddy_tenants(db)
+
     return {
         "tenant": {
             "id": created_tenant.id,
@@ -1212,7 +1243,9 @@ def toggle_tenant_features(
     db_tenant = crud.get_tenant(db, tenant_id)
     if not db_tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
-    return crud.update_tenant(db, tenant_id, payload)
+    updated = crud.update_tenant(db, tenant_id, payload)
+    sync_caddy_tenants(db)
+    return updated
 
 @app.delete("/api/saas-admin/tenants/{tenant_id}")
 def remove_tenant(
@@ -1229,6 +1262,7 @@ def remove_tenant(
     db.query(models.TenantUser).filter(models.TenantUser.tenant_id == tenant_id).delete()
     db.delete(db_tenant)
     db.commit()
+    sync_caddy_tenants(db)
     return {"message": f"Tenant '{tenant_id}' deleted successfully"}
 
 @app.post("/api/saas-admin/tenants/{tenant_id}/reset-password")
