@@ -365,11 +365,14 @@ export default function App() {
   };
 
   const handleInstallPWA = async () => {
-    if (!installPrompt) return;
-    installPrompt.prompt();
-    const choice = await installPrompt.userChoice;
-    if (choice?.outcome === "accepted") {
-      setInstallPrompt(null);
+    if (installPrompt) {
+      installPrompt.prompt();
+      const choice = await installPrompt.userChoice;
+      if (choice?.outcome === "accepted") {
+        setInstallPrompt(null);
+      }
+    } else {
+      alert("To install this app on your device:\n\n• On Chrome/Edge (Desktop): Click the Install icon on the right side of the URL address bar, or click Menu (⋮) → 'Install App'.\n• On Android (Chrome): Tap Menu (⋮) → 'Add to Home screen' or 'Install App'.\n• On iPhone/iPad (Safari): Tap the Share button → 'Add to Home Screen'.");
     }
   };
 
@@ -759,50 +762,8 @@ export default function App() {
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-teal-500/15 text-teal-400 font-bold border border-teal-500/25">Setup</span>
           </button>
 
-          {/* Tenant View: Clean, professional user identity (No Role selector or Multi-Tenant Scope cards) */}
-          {isTenantWorkspace ? (
-            tenantUser ? (
-              <div className="flex items-center justify-between px-3 py-2 rounded-xl border border-[var(--border-color)] bg-[var(--bg-app)] text-xs">
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className="w-7 h-7 rounded-lg bg-teal-500/15 border border-teal-500/25 text-teal-400 font-bold flex items-center justify-center text-xs shrink-0">
-                    {(tenantUser.full_name || tenantUser.username || "A")[0].toUpperCase()}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="font-semibold text-xs truncate text-[var(--text-main)] leading-tight">
-                      {tenantUser.full_name || tenantUser.username || "Staff User"}
-                    </div>
-                    <div className="text-[10px] text-[var(--text-muted)] truncate capitalize">
-                      {tenantUser.role === "desk_staff" ? "Desk Staff" : "Tenant Admin"}
-                    </div>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleTenantLogout}
-                  title="Sign Out"
-                  className="text-[10px] font-bold text-rose-400 hover:text-rose-300 px-2 py-1 rounded-lg bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500/20 transition-all shrink-0 ml-1.5"
-                >
-                  Sign Out
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  setTenantLoginForm({
-                    tenant_id: activeTenantId,
-                    username: "",
-                    password: ""
-                  });
-                  setShowTenantLoginModal(true);
-                }}
-                className="w-full py-2 px-3 rounded-xl bg-teal-500/10 hover:bg-teal-500/20 border border-teal-500/25 text-teal-400 text-xs font-bold text-center transition-all flex items-center justify-center gap-1.5"
-              >
-                <span>🔐</span> Staff Sign In
-              </button>
-            )
-          ) : (
-            /* Operator / Platform Demo View (only visible on racms.omnysync.com root default workspace) */
+          {/* Operator / Platform Demo View (only visible on racms.omnysync.com root default workspace) */}
+          {!isTenantWorkspace && (
             <>
               <div className="text-left">
                 <label className="block text-[11px] font-medium text-[var(--text-muted)] mb-1.5">Role</label>
@@ -856,6 +817,7 @@ export default function App() {
               </div>
             </>
           )}
+
           {/* PWA Offline & Sync Indicator */}
           <div className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-app)] text-[11px]">
             <div className="flex items-center gap-1.5 min-w-0">
@@ -880,19 +842,14 @@ export default function App() {
             )}
           </div>
 
-          {installPrompt && (
-            <button
-              type="button"
-              onClick={handleInstallPWA}
-              className="w-full py-2 px-3 rounded-lg bg-teal-500/15 text-teal-500 border border-teal-500/30 hover:bg-teal-500/25 text-xs font-bold flex items-center justify-center gap-1.5 transition-all"
-            >
-              <Smartphone className="h-3.5 w-3.5" /> Install App (PWA)
-            </button>
-          )}
-
-          <p className="text-[11px] text-[var(--text-muted)] leading-snug text-left">
-            {branding.branding_settings?.footer_status_text || "Offline PWA ready"}
-          </p>
+          {/* Download App (PWA) button */}
+          <button
+            type="button"
+            onClick={handleInstallPWA}
+            className="w-full py-2 px-3 rounded-lg bg-teal-500/15 text-teal-400 border border-teal-500/30 hover:bg-teal-500/25 text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-sm"
+          >
+            <Download className="h-3.5 w-3.5 shrink-0" /> Download App (PWA)
+          </button>
         </div>
       </aside>
 
