@@ -7,7 +7,7 @@ import threading
 import urllib.request
 from datetime import datetime, date, timedelta
 from typing import List, Optional
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, status, Request
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, status, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -251,6 +251,27 @@ def keep_alive_scheduler():
 def health_check():
     """Public health check endpoint for uptime pingers (UptimeRobot, Cron-job, Render)."""
     return {"status": "online", "timestamp": datetime.utcnow().isoformat()}
+
+@app.get("/api/caddy/check-domain")
+def caddy_check_domain(domain: str = Query(...), db: Session = Depends(get_db)):
+    """
+    Caddy On-Demand TLS security gate.
+    Verifies that a requested domain/subdomain belongs to a valid active tenant before issuing TLS certificates.
+    """
+    clean_domain = domain.strip().lower()
+    if clean_domain in ("racms.omnysync.com", "omnysync.com", "localhost", "127.0.0.1"):
+        return {"status": "ok", "allowed": True}
+
+    if clean_domain.endswith(".omnysync.com"):
+        sub = clean_domain.replace(".omnysync.com", "")
+        # Also handle two-level e.g. sub.racms.omnysync.com
+        if sub.endswith(".racms"):
+            sub = sub.replace(".racms", "")
+        tenant = db.query(models.Tenant).filter(models.Tenant.id == sub).first()
+        if tenant and tenant.is_active:
+            return {"status": "ok", "allowed": True, "tenant_id": tenant.id}
+
+    raise HTTPException(status_code=404, detail="Domain not authorized for on-demand TLS")
 
 @app.on_event("startup")
 def startup_event():
