@@ -237,6 +237,19 @@ class Tenant(Base):
     feature_flags = Column(JSON, nullable=False, default=list) # e.g. ["whatsapp_api", "advanced_analytics"]
     branding_settings = Column(JSON, nullable=False, default=dict)
 
+class TenantUser(Base):
+    __tablename__ = "tenant_users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(String, nullable=False, index=True)
+    username = Column(String, nullable=False, index=True)
+    email = Column(String, nullable=True)
+    hashed_password = Column(String, nullable=False)
+    role = Column(String, nullable=False, default="tenant_admin")
+    full_name = Column(String, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=True, default=datetime.utcnow)
+
 class Employee(Base):
     __tablename__ = "employees"
 

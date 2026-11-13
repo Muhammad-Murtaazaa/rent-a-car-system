@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
 import {
   Server, Users, BarChart3, Plus, X, Palette, CheckCircle,
-  ShieldAlert, Sliders, Clock, Trash2, Power, Sparkles, ExternalLink, Car
+  ShieldAlert, Sliders, Clock, Trash2, Power, Sparkles, ExternalLink, Car,
+  Lock, KeyRound, Eye, EyeOff, Copy, ArrowRight, ShieldCheck, RefreshCw, LogOut
 } from "lucide-react";
 
 const ALL_FLAGS = [
@@ -24,45 +25,104 @@ function addDaysISO(days) {
   return d.toISOString().slice(0, 10);
 }
 
-export default function SuperAdminDashboard({ userRole, setUserRole }) {
+function slugify(text) {
+  return (text || "")
+    .toString()
+    .toLowerCase()
+    .trim()
+    .replace(/[\s\W-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function generatePassword(name) {
+  const clean = (name || "Rental").replace(/[^a-zA-Z0-9]/g, "");
+  const prefix = clean.length >= 3 ? clean.charAt(0).toUpperCase() + clean.slice(1, 5) : "Car";
+  const num = Math.floor(100 + Math.random() * 900);
+  return `${prefix}#${num}!`;
+}
+
+export default function SuperAdminDashboard({ userRole, setUserRole, onLoginAsTenant }) {
+  const [adminToken, setAdminToken] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("saas_super_admin_token") || "";
+    }
+    return "";
+  });
+
+  const [passwordInput, setPasswordInput] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [authenticating, setAuthenticating] = useState(false);
+
   const [tenants, setTenants] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const defaultForm = () => ({
-    id: "",
-    name: "",
-    logo_url: "",
-    primary_theme_color: "#0d9488",
-    contact_name: "",
-    operational_manager: "Operational Manager",
-    plan_type: "trial_7d",
-    subscription_status: "trialing",
-    trial_ends_at: addDaysISO(7),
-    is_active: true,
-    feature_flags: [...ALL_FLAGS],
-    branding_settings: {
-      support_email: "support@omnysync.com",
-      support_phone: "0300-1234567",
-      footer_status_text: "Cloud SaaS Platform",
-      bg_gradient_start: "#0d9488"
-    }
-  });
+  // Auto-slug control
+  const [isSlugManual, setIsSlugManual] = useState(false);
+
+  const defaultForm = () => {
+    const initialPass = generatePassword("Agency");
+    return {
+      id: "",
+      name: "",
+      logo_url: "",
+      primary_theme_color: "#0d9488",
+      contact_name: "",
+      operational_manager: "Manager",
+      plan_type: "trial_7d",
+      subscription_status: "trialing",
+      trial_ends_at: addDaysISO(7),
+      is_active: true,
+      admin_username: "",
+      admin_password: initialPass,
+      admin_email: "",
+      feature_flags: [...ALL_FLAGS],
+      branding_settings: {
+        support_email: "support@omnysync.com",
+        support_phone: "0300-1234567",
+        hub_label: "Main Hub",
+        address: "Lahore, Pakistan",
+        footer_status_text: "Cloud SaaS Platform",
+        bg_gradient_start: "#0d9488"
+      }
+    };
+  };
 
   const [showProvisionModal, setShowProvisionModal] = useState(false);
   const [newTenantForm, setNewTenantForm] = useState(defaultForm);
+  const [showFormPassword, setShowFormPassword] = useState(false);
+
+  // Success Handoff Modal
+  const [provisionedHandoff, setProvisionedHandoff] = useState(null);
+  const [copiedInvite, setCopiedInvite] = useState(false);
 
   // Config Modal State
   const [selectedTenant, setSelectedTenant] = useState(null);
   const [activeTab, setActiveTab] = useState("branding"); // "branding" | "features" | "subscription"
 
+  // Reset Password Modal
+  const [resetTargetTenant, setResetTargetTenant] = useState(null);
+  const [newResetPassword, setNewResetPassword] = useState("");
+  const [resetting, setResetting] = useState(false);
+
   const fetchTenants = async () => {
+    if (!adminToken) return;
     setLoading(true);
     try {
+      const headers = {
+        "Authorization": `Bearer ${adminToken}`,
+        "X-Test-Role": "super_admin"
+      };
       const [tRes, sRes] = await Promise.all([
-        fetch("/api/saas-admin/tenants", { headers: { "X-Test-Role": "super_admin" } }),
-        fetch("/api/saas-admin/stats", { headers: { "X-Test-Role": "super_admin" } })
+        fetch("/api/saas-admin/tenants", { headers }),
+        fetch("/api/saas-admin/stats", { headers })
       ]);
+      if (tRes.status === 401 || tRes.status === 403) {
+        localStorage.removeItem("saas_super_admin_token");
+        setAdminToken("");
+        return;
+      }
       if (tRes.ok) setTenants(await tRes.json());
       if (sRes.ok) setStats(await sRes.json());
     } catch (err) {
@@ -73,8 +133,71 @@ export default function SuperAdminDashboard({ userRole, setUserRole }) {
   };
 
   useEffect(() => {
-    fetchTenants();
-  }, []);
+    if (adminToken) {
+      fetchTenants();
+    }
+  }, [adminToken]);
+
+  const handleSuperAdminLogin = async (e) => {
+    e.preventDefault();
+    setAuthenticating(true);
+    setAuthError("");
+    try {
+      const res = await fetch("/api/auth/super-admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: passwordInput.trim() })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        localStorage.setItem("saas_super_admin_token", data.access_token);
+        setAdminToken(data.access_token);
+        setPasswordInput("");
+      } else {
+        const err = await res.json();
+        setAuthError(err.detail || "Invalid Super Admin Master Password");
+      }
+    } catch {
+      setAuthError("Connection error while validating credentials.");
+    } finally {
+      setAuthenticating(false);
+    }
+  };
+
+  const handleLockAdmin = () => {
+    localStorage.removeItem("saas_super_admin_token");
+    setAdminToken("");
+    if (setUserRole) setUserRole("tenant_admin");
+    if (typeof window !== "undefined" && window.location.hash === "#admin") {
+      window.location.hash = "";
+    }
+  };
+
+  // Auto-slug & Auto-credentials sync on Agency Name change
+  const handleAgencyNameChange = (val) => {
+    const autoSlug = slugify(val);
+    setNewTenantForm(prev => {
+      const updated = { ...prev, name: val };
+      if (!isSlugManual) {
+        updated.id = autoSlug;
+        updated.admin_username = autoSlug ? `admin@${autoSlug}.com` : "";
+        updated.admin_email = autoSlug ? `admin@${autoSlug}.com` : "";
+      }
+      if (!prev.contact_name) {
+        updated.contact_name = "Manager";
+      }
+      updated.branding_settings = {
+        ...prev.branding_settings,
+        hub_label: val ? `${val} Main Hub` : "Main Hub"
+      };
+      return updated;
+    });
+  };
+
+  const handleRegeneratePassword = () => {
+    const newPass = generatePassword(newTenantForm.name || newTenantForm.id);
+    setNewTenantForm(prev => ({ ...prev, admin_password: newPass }));
+  };
 
   const handlePlanChangeInProvision = (plan) => {
     if (plan === "trial_7d") {
@@ -98,24 +221,77 @@ export default function SuperAdminDashboard({ userRole, setUserRole }) {
     e.preventDefault();
     const payload = {
       ...newTenantForm,
+      id: newTenantForm.id.toLowerCase().trim(),
+      admin_username: newTenantForm.admin_username || `admin_${newTenantForm.id}`,
+      admin_password: newTenantForm.admin_password || `${newTenantForm.id}#2026!`,
+      admin_email: newTenantForm.admin_email || `admin@${newTenantForm.id}.com`,
       trial_ends_at: newTenantForm.trial_ends_at || null
     };
-    const res = await fetch("/api/saas-admin/tenants", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Test-Role": "super_admin"
-      },
-      body: JSON.stringify(payload)
-    });
 
-    if (res.ok) {
-      setShowProvisionModal(false);
-      setNewTenantForm(defaultForm());
-      fetchTenants();
+    try {
+      const res = await fetch("/api/saas-admin/tenants", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${adminToken}`,
+          "X-Test-Role": "super_admin"
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setShowProvisionModal(false);
+        setProvisionedHandoff({
+          tenant: data.tenant || payload,
+          credentials: data.credentials || {
+            subdomain: payload.id,
+            login_url: `https://${payload.id}.racms.omnysync.com`,
+            username: payload.admin_username,
+            password: payload.admin_password,
+            email: payload.admin_email
+          }
+        });
+        setNewTenantForm(defaultForm());
+        setIsSlugManual(false);
+        fetchTenants();
+      } else {
+        const err = await res.json();
+        alert(err.detail || "Error provisioning tenant");
+      }
+    } catch {
+      alert("Error sending provisioning request.");
+    }
+  };
+
+  const copyClientInvite = () => {
+    if (!provisionedHandoff) return;
+    const { tenant, credentials } = provisionedHandoff;
+    const text = `🚗 *Welcome to your Rent-A-Car Management Platform!*\n\n` +
+      `Your agency cloud workspace has been activated:\n` +
+      `🏢 *Agency:* ${tenant.name}\n` +
+      `🌐 *Web Portal:* ${credentials.login_url || `https://${credentials.subdomain}.racms.omnysync.com`}\n` +
+      `👤 *Admin Username:* ${credentials.username}\n` +
+      `🔑 *Initial Password:* ${credentials.password}\n` +
+      `⏳ *Plan:* ${tenant.plan_type === "trial_7d" ? "7-Day Free Trial (Active)" : "Active Plan"}\n\n` +
+      `You can immediately log in to manage your Fleet (chassis numbers), Customers (cheques, passport, KYC), Bookings, Multi-vehicle Quotations, Invoices, Receipts, and Letterhead.\n\n` +
+      `Support: ${tenant.branding_settings?.support_phone || "0300-1234567"}`;
+
+    navigator.clipboard.writeText(text);
+    setCopiedInvite(true);
+    setTimeout(() => setCopiedInvite(false), 3000);
+  };
+
+  const handleLoginAsTenantClick = (tenantId) => {
+    if (onLoginAsTenant) {
+      onLoginAsTenant(tenantId);
     } else {
-      const err = await res.json();
-      alert(err.detail || "Error provisioning tenant");
+      localStorage.setItem("active_tenant_id", tenantId);
+      if (setUserRole) setUserRole("tenant_admin");
+      if (typeof window !== "undefined") {
+        window.location.hash = "";
+        window.location.reload();
+      }
     }
   };
 
@@ -130,6 +306,7 @@ export default function SuperAdminDashboard({ userRole, setUserRole }) {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
+        "Authorization": `Bearer ${adminToken}`,
         "X-Test-Role": "super_admin"
       },
       body: JSON.stringify({
@@ -165,6 +342,7 @@ export default function SuperAdminDashboard({ userRole, setUserRole }) {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
+        "Authorization": `Bearer ${adminToken}`,
         "X-Test-Role": "super_admin"
       },
       body: JSON.stringify(payload)
@@ -173,14 +351,17 @@ export default function SuperAdminDashboard({ userRole, setUserRole }) {
       const updatedTenant = await res.json();
       setSelectedTenant(updatedTenant);
       setTenants(tenants.map(t => t.id === updatedTenant.id ? updatedTenant : t));
-      alert("Tenant settings & subscription saved.");
+      alert("Tenant settings saved.");
     }
   };
 
   const handleExtendTrial = async (tenantId, days = 7) => {
     const res = await fetch(`/api/saas-admin/tenants/${tenantId}/extend-trial?days=${days}`, {
       method: "POST",
-      headers: { "X-Test-Role": "super_admin" }
+      headers: {
+        "Authorization": `Bearer ${adminToken}`,
+        "X-Test-Role": "super_admin"
+      }
     });
     if (res.ok) {
       fetchTenants();
@@ -192,6 +373,7 @@ export default function SuperAdminDashboard({ userRole, setUserRole }) {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
+        "Authorization": `Bearer ${adminToken}`,
         "X-Test-Role": "super_admin"
       },
       body: JSON.stringify({
@@ -203,10 +385,13 @@ export default function SuperAdminDashboard({ userRole, setUserRole }) {
   };
 
   const handleDeleteTenant = async (tenantId) => {
-    if (!window.confirm(`Delete tenant '${tenantId}' permanently?`)) return;
+    if (!window.confirm(`Delete tenant '${tenantId}' permanently? All associated users and settings will be removed.`)) return;
     const res = await fetch(`/api/saas-admin/tenants/${tenantId}`, {
       method: "DELETE",
-      headers: { "X-Test-Role": "super_admin" }
+      headers: {
+        "Authorization": `Bearer ${adminToken}`,
+        "X-Test-Role": "super_admin"
+      }
     });
     if (res.ok) fetchTenants();
     else {
@@ -215,58 +400,144 @@ export default function SuperAdminDashboard({ userRole, setUserRole }) {
     }
   };
 
-  const updateBrandingSetting = (key, value) => {
-    setSelectedTenant(prev => ({
-      ...prev,
-      branding_settings: {
-        ...(prev.branding_settings || {}),
-        [key]: value
+  const handleResetPasswordSubmit = async (e) => {
+    e.preventDefault();
+    if (!resetTargetTenant || !newResetPassword.trim()) return;
+    setResetting(true);
+    try {
+      const res = await fetch(`/api/saas-admin/tenants/${resetTargetTenant.id}/reset-password`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${adminToken}`,
+          "X-Test-Role": "super_admin"
+        },
+        body: JSON.stringify({ new_password: newResetPassword.trim() })
+      });
+      if (res.ok) {
+        alert(`Password for tenant '${resetTargetTenant.id}' updated successfully!`);
+        setResetTargetTenant(null);
+        setNewResetPassword("");
+      } else {
+        const err = await res.json();
+        alert(err.detail || "Error resetting password");
       }
-    }));
+    } catch {
+      alert("Failed to reset password.");
+    } finally {
+      setResetting(false);
+    }
   };
 
-  if (userRole !== "super_admin") {
+  // --- PASSWORD LOCK GATE (IF NOT AUTHENTICATED) ---
+  if (!adminToken) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-[var(--bg-app)] text-[var(--text-main)] p-6">
-        <ShieldAlert className="h-16 w-16 text-rose-500 mb-4 animate-bounce" />
-        <h1 className="text-2xl font-bold">Access Forbidden</h1>
-        <p className="text-sm text-[var(--text-muted)] mt-2">Only Super Admins can access the SaaS Control Center.</p>
-        <button onClick={() => setUserRole("super_admin")} className="btn-accent px-6 py-2.5 rounded-xl font-bold mt-6">
-          Elevate to Super Admin (Testing)
-        </button>
+      <div className="flex flex-col items-center justify-center min-h-screen bg-[var(--bg-app)] text-[var(--text-main)] p-4">
+        <div className="glass-panel w-full max-w-md p-8 rounded-2xl border border-[var(--border-color)] shadow-2xl text-center space-y-6">
+          <div className="h-16 w-16 mx-auto rounded-2xl bg-teal-500/10 border border-teal-500/30 flex items-center justify-center text-teal-400 shadow-inner">
+            <Lock className="h-8 w-8" />
+          </div>
+
+          <div>
+            <span className="text-[10px] uppercase font-bold tracking-widest text-teal-500 bg-teal-500/10 px-2.5 py-1 rounded-full border border-teal-500/20">
+              Restricted Operator Access
+            </span>
+            <h2 className="text-2xl font-extrabold mt-3">SaaS Super Admin Gate</h2>
+            <p className="text-xs text-[var(--text-muted)] mt-1.5">
+              Enter the Super Admin master password to manage multi-tenant environments, trials, and credentials.
+            </p>
+          </div>
+
+          <form onSubmit={handleSuperAdminLogin} className="space-y-4 text-left">
+            <div>
+              <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Master Password</label>
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  required
+                  autoFocus
+                  placeholder="Enter Master Password"
+                  value={passwordInput}
+                  onChange={(e) => setPasswordInput(e.target.value)}
+                  className="w-full app-input rounded-xl py-2.5 pl-3 pr-10 text-sm focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-main)]"
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+
+            {authError && (
+              <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-500 text-xs font-semibold">
+                {authError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={authenticating}
+              className="w-full btn-accent text-white font-bold py-3 rounded-xl text-sm flex items-center justify-center gap-2 shadow-lg transition-all"
+            >
+              {authenticating ? <RefreshCw className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+              {authenticating ? "Verifying..." : "Unlock Operator Console"}
+            </button>
+          </form>
+
+          <div className="pt-2 border-t border-[var(--border-color)]">
+            <button
+              type="button"
+              onClick={() => {
+                if (setUserRole) setUserRole("tenant_admin");
+                if (typeof window !== "undefined" && window.location.hash === "#admin") {
+                  window.location.hash = "";
+                }
+              }}
+              className="text-xs text-[var(--text-muted)] hover:text-[var(--text-main)] hover:underline"
+            >
+              ← Return to Agency Dashboard
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
 
+  // --- SUPER ADMIN AUTHENTICATED CONSOLE ---
   return (
     <div className="min-h-screen bg-[var(--bg-app)] text-[var(--text-main)] p-4 sm:p-8 space-y-8">
 
-      {/* Header */}
+      {/* Header Bar */}
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 border-b border-[var(--border-color)] pb-6">
         <div>
-          <span className="bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20 text-[10px] font-extrabold uppercase px-3 py-1 rounded-full tracking-widest">
-            SaaS Operator Control Center
-          </span>
-          <h1 className="text-3xl font-extrabold tracking-tight mt-2 text-[var(--text-main)]">Omnysync Multi-Tenant Admin</h1>
-          <p className="text-xs text-[var(--text-muted)] mt-1">Provision client subdomains, 7-day free trials, white-label branding & module access.</p>
+          <div className="flex items-center gap-2">
+            <span className="bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20 text-[10px] font-extrabold uppercase px-3 py-1 rounded-full tracking-widest flex items-center gap-1.5">
+              <ShieldCheck className="h-3 w-3" /> Super Admin Active
+            </span>
+          </div>
+          <h1 className="text-3xl font-extrabold tracking-tight mt-2 text-[var(--text-main)]">Omnysync Multi-Tenant Platform</h1>
+          <p className="text-xs text-[var(--text-muted)] mt-1">
+            Provision client subdomains, auto-generate credentials, activate 7-day free trials, and initialize isolated workspaces.
+          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <select
-            value={userRole}
-            onChange={(e) => setUserRole(e.target.value)}
-            className="bg-[var(--tr-hover)] border border-[var(--border-color)] text-xs rounded-xl p-2.5 focus:outline-none text-[var(--text-main)] font-semibold"
+          <button
+            onClick={() => { setNewTenantForm(defaultForm()); setIsSlugManual(false); setShowProvisionModal(true); }}
+            className="btn-accent text-white font-bold py-2.5 px-4 rounded-xl text-xs flex items-center gap-2 shadow-md min-h-[44px]"
           >
-            <option value="super_admin">Super Admin Role</option>
-            <option value="tenant_admin">Back to App (Tenant Admin)</option>
-            <option value="desk_staff">Back to App (Desk Staff)</option>
-          </select>
+            <Plus className="h-4 w-4" /> + Provision New Tenant / 7d Trial
+          </button>
 
           <button
-            onClick={() => { setNewTenantForm(defaultForm()); setShowProvisionModal(true); }}
-            className="btn-accent text-white font-bold py-2.5 px-4 rounded-xl text-xs flex items-center gap-2 min-h-[44px]"
+            onClick={handleLockAdmin}
+            className="py-2.5 px-3.5 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 font-bold text-xs flex items-center gap-1.5 transition-colors"
+            title="Lock Super Admin and return to workspace"
           >
-            <Plus className="h-4 w-4" /> Provision Client / 7-Day Trial
+            <LogOut className="h-4 w-4" /> Lock & Exit
           </button>
         </div>
       </div>
@@ -278,8 +549,8 @@ export default function SuperAdminDashboard({ userRole, setUserRole }) {
             <Server className="h-6 w-6 text-teal-500" />
           </div>
           <div>
-            <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">Provisioned Agencies</span>
-            <span className="block text-2xl font-extrabold mt-0.5">{stats?.total_tenants ?? tenants.length} Tenants</span>
+            <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">Total Active Tenants</span>
+            <span className="block text-2xl font-extrabold mt-0.5">{stats?.total_tenants ?? tenants.length} Agencies</span>
           </div>
         </div>
 
@@ -288,8 +559,8 @@ export default function SuperAdminDashboard({ userRole, setUserRole }) {
             <Clock className="h-6 w-6 text-amber-500" />
           </div>
           <div>
-            <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">Active 7-Day Trials</span>
-            <span className="block text-2xl font-extrabold mt-0.5">{stats?.trial_tenants ?? tenants.filter(t => t.subscription_status === "trialing").length} Trialing</span>
+            <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">7-Day Free Trials Active</span>
+            <span className="block text-2xl font-extrabold mt-0.5">{stats?.trial_tenants ?? tenants.filter(t => t.subscription_status === "trialing").length} Trials</span>
           </div>
         </div>
 
@@ -317,7 +588,7 @@ export default function SuperAdminDashboard({ userRole, setUserRole }) {
       {/* Tenant Table Grid */}
       <div className="glass-panel rounded-2xl shadow-xl overflow-hidden border border-[var(--border-color)]">
         <div className="p-6 border-b border-[var(--border-color)] flex justify-between items-center">
-          <h3 className="font-bold text-lg">Provisioned Agency Tenants & Free Trials</h3>
+          <h3 className="font-bold text-lg">Provisioned Agency Tenants</h3>
           <span className="bg-[var(--tr-hover)] text-xs border border-[var(--border-color)] font-mono px-3 py-1 rounded-full">
             {tenants.length} Total
           </span>
@@ -328,17 +599,16 @@ export default function SuperAdminDashboard({ userRole, setUserRole }) {
             <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-teal-500"></div>
           </div>
         ) : tenants.length === 0 ? (
-          <p className="text-sm text-[var(--text-muted)] py-12 text-center italic">No tenants provisioned yet. Add the first one!</p>
+          <p className="text-sm text-[var(--text-muted)] py-12 text-center italic">No tenants provisioned yet. Add your first tenant!</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-[var(--tr-hover)] text-[var(--text-muted)] border-b border-[var(--border-color)] uppercase font-semibold">
                   <th className="p-4">Agency Details</th>
-                  <th className="p-4">Subdomain</th>
+                  <th className="p-4">Subdomain & Portal</th>
                   <th className="p-4">Plan & Trial</th>
                   <th className="p-4">Status</th>
-                  <th className="p-4">Modules</th>
                   <th className="p-4 text-center">Actions</th>
                 </tr>
               </thead>
@@ -397,12 +667,23 @@ export default function SuperAdminDashboard({ userRole, setUserRole }) {
                         </span>
                       </td>
                       <td className="p-4">
-                        <span className="font-mono text-[11px] font-bold text-[var(--text-muted)]">
-                          {t.feature_flags?.length || 0} / {ALL_FLAGS.length} enabled
-                        </span>
-                      </td>
-                      <td className="p-4">
                         <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                          <button
+                            onClick={() => handleLoginAsTenantClick(t.id)}
+                            title="Open & Login to this Tenant's workspace"
+                            className="py-1.5 px-2.5 rounded-lg bg-teal-500 text-white font-bold text-[11px] flex items-center gap-1 shadow-sm hover:brightness-110"
+                          >
+                            <ArrowRight className="h-3 w-3" /> Login as Tenant
+                          </button>
+
+                          <button
+                            onClick={() => { setResetTargetTenant(t); setNewResetPassword(generatePassword(t.name)); }}
+                            title="Reset or Change Password"
+                            className="py-1.5 px-2.5 rounded-lg bg-[var(--bg-app)] border border-[var(--border-color)] hover:border-teal-500 font-semibold text-[11px] flex items-center gap-1"
+                          >
+                            <KeyRound className="h-3 w-3 text-amber-500" /> Password
+                          </button>
+
                           <button
                             onClick={() => handleExtendTrial(t.id, 7)}
                             title="Start or Extend 7-Day Free Trial"
@@ -410,12 +691,14 @@ export default function SuperAdminDashboard({ userRole, setUserRole }) {
                           >
                             <Sparkles className="h-3 w-3" /> +7d Trial
                           </button>
+
                           <button
                             onClick={() => { setSelectedTenant(t); setActiveTab("branding"); }}
                             className="py-1.5 px-2.5 rounded-lg bg-[var(--bg-app)] border border-[var(--border-color)] hover:border-teal-500 hover:text-teal-500 font-bold text-[11px]"
                           >
                             Configure
                           </button>
+
                           {t.id !== "default" && (
                             <>
                               <button
@@ -445,12 +728,15 @@ export default function SuperAdminDashboard({ userRole, setUserRole }) {
         )}
       </div>
 
-      {/* Provisioning Modal */}
+      {/* PROVISIONING MODAL WITH AUTO-SLUG & AUTO-CREDENTIALS */}
       {showProvisionModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="glass-panel w-full max-w-lg rounded-2xl p-6 shadow-2xl space-y-5 border border-[var(--border-color)] max-h-[90vh] overflow-y-auto">
+          <div className="glass-panel w-full max-w-xl rounded-2xl p-6 shadow-2xl space-y-5 border border-[var(--border-color)] max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center pb-3 border-b border-[var(--border-color)]">
-              <h3 className="text-xl font-bold">Provision New SaaS Client</h3>
+              <div>
+                <h3 className="text-xl font-bold">Provision New SaaS Tenant</h3>
+                <p className="text-xs text-[var(--text-muted)]">Subdomain, database isolation, and initial credentials will be created automatically.</p>
+              </div>
               <button onClick={() => setShowProvisionModal(false)} className="text-[var(--text-muted)] hover:text-[var(--text-main)] min-h-[44px] min-w-[44px] flex items-center justify-center">
                 <X className="h-5 w-5" />
               </button>
@@ -458,8 +744,8 @@ export default function SuperAdminDashboard({ userRole, setUserRole }) {
 
             <form onSubmit={handleProvisionSubmit} className="space-y-4 text-xs">
               {/* Plan Selector */}
-              <div className="p-3 rounded-xl bg-teal-500/5 border border-teal-500/20 space-y-2">
-                <label className="block font-bold text-[var(--text-main)]">Subscription Plan *</label>
+              <div className="p-3.5 rounded-xl bg-teal-500/5 border border-teal-500/20 space-y-2">
+                <label className="block font-bold text-[var(--text-main)]">Subscription Plan</label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {[
                     { id: "trial_7d", label: "7-Day Free Trial" },
@@ -473,7 +759,7 @@ export default function SuperAdminDashboard({ userRole, setUserRole }) {
                       onClick={() => handlePlanChangeInProvision(p.id)}
                       className={`py-2 px-2 rounded-lg font-bold border text-[11px] transition-all ${
                         newTenantForm.plan_type === p.id
-                          ? "bg-teal-500 text-white border-teal-500"
+                          ? "bg-teal-500 text-white border-teal-500 shadow-sm"
                           : "bg-[var(--bg-app)] border-[var(--border-color)] text-[var(--text-muted)]"
                       }`}
                     >
@@ -483,7 +769,7 @@ export default function SuperAdminDashboard({ userRole, setUserRole }) {
                 </div>
                 {newTenantForm.plan_type === "trial_7d" && (
                   <div className="flex items-center justify-between pt-1">
-                    <span className="text-[11px] text-amber-500 font-semibold">Trial automatically expires on:</span>
+                    <span className="text-[11px] text-amber-500 font-semibold">Trial automatically ends on:</span>
                     <input
                       type="date"
                       value={newTenantForm.trial_ends_at}
@@ -494,63 +780,111 @@ export default function SuperAdminDashboard({ userRole, setUserRole }) {
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block font-semibold text-[var(--text-muted)] mb-1">Agency Subdomain Prefix *</label>
-                  <input
-                    type="text" required placeholder="e.g. lahore-cabs"
-                    value={newTenantForm.id}
-                    onChange={(e) => setNewTenantForm({ ...newTenantForm, id: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "") })}
-                    className="w-full app-input rounded-lg p-2.5 focus:outline-none font-mono"
-                  />
-                  <span className="text-[10px] text-[var(--text-muted)] mt-1 block">{newTenantForm.id || "client"}.omnysync.com</span>
+              {/* Agency Name (Typing auto-slugs and auto-generates username & password) */}
+              <div>
+                <label className="block font-semibold text-[var(--text-muted)] mb-1">Agency Legal Name *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Azeem Rent A Car"
+                  value={newTenantForm.name}
+                  onChange={(e) => handleAgencyNameChange(e.target.value)}
+                  className="w-full app-input rounded-lg p-2.5 focus:outline-none text-sm font-semibold"
+                />
+              </div>
+
+              {/* Auto-Subdomain Prefix */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="font-semibold text-[var(--text-muted)]">Subdomain Prefix *</label>
+                  <span className="text-[10px] text-teal-400 font-mono">Auto-generated</span>
                 </div>
-                <div>
-                  <label className="block font-semibold text-[var(--text-muted)] mb-1">Agency Legal Name *</label>
+                <div className="flex items-center gap-2">
                   <input
-                    type="text" required placeholder="e.g. Royal Rent A Car"
-                    value={newTenantForm.name}
-                    onChange={(e) => setNewTenantForm({ ...newTenantForm, name: e.target.value })}
-                    className="w-full app-input rounded-lg p-2.5 focus:outline-none"
+                    type="text"
+                    required
+                    placeholder="e.g. azeem"
+                    value={newTenantForm.id}
+                    onChange={(e) => {
+                      setIsSlugManual(true);
+                      setNewTenantForm({ ...newTenantForm, id: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "") });
+                    }}
+                    className="w-full app-input rounded-lg p-2.5 focus:outline-none font-mono text-sm"
                   />
+                </div>
+                <span className="text-[10px] text-[var(--text-muted)] mt-1 block">
+                  Public Portal: <strong className="text-teal-400">https://{newTenantForm.id || "subdomain"}.racms.omnysync.com</strong>
+                </span>
+              </div>
+
+              {/* Credentials Section */}
+              <div className="p-3.5 rounded-xl border border-teal-500/30 bg-teal-500/5 space-y-3">
+                <div className="flex items-center gap-2 text-teal-400 font-bold text-xs">
+                  <KeyRound className="h-4 w-4" />
+                  <span>Tenant Admin Initial Credentials</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[var(--text-muted)] mb-1">Admin Username / Email</label>
+                    <input
+                      type="text"
+                      required
+                      value={newTenantForm.admin_username}
+                      onChange={(e) => setNewTenantForm({ ...newTenantForm, admin_username: e.target.value })}
+                      placeholder="admin@agency.com"
+                      className="w-full app-input rounded-lg p-2 focus:outline-none font-mono text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] font-semibold text-[var(--text-muted)]">Initial Password</label>
+                      <button
+                        type="button"
+                        onClick={handleRegeneratePassword}
+                        className="text-[10px] text-teal-400 hover:underline"
+                      >
+                        Generate New
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type={showFormPassword ? "text" : "password"}
+                        required
+                        value={newTenantForm.admin_password}
+                        onChange={(e) => setNewTenantForm({ ...newTenantForm, admin_password: e.target.value })}
+                        className="w-full app-input rounded-lg p-2 pr-8 focus:outline-none font-mono text-xs"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowFormPassword(!showFormPassword)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-main)]"
+                      >
+                        {showFormPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
 
+              {/* Contact Person Details */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block font-semibold text-[var(--text-muted)] mb-1">Client Contact Name *</label>
+                  <label className="block font-semibold text-[var(--text-muted)] mb-1">Contact Person Name</label>
                   <input
-                    type="text" required placeholder="Full Name"
+                    type="text"
+                    placeholder="Full Name"
                     value={newTenantForm.contact_name}
                     onChange={(e) => setNewTenantForm({ ...newTenantForm, contact_name: e.target.value })}
                     className="w-full app-input rounded-lg p-2.5 focus:outline-none"
                   />
                 </div>
                 <div>
-                  <label className="block font-semibold text-[var(--text-muted)] mb-1">Designation Title</label>
-                  <input
-                    type="text" required
-                    value={newTenantForm.operational_manager}
-                    onChange={(e) => setNewTenantForm({ ...newTenantForm, operational_manager: e.target.value })}
-                    className="w-full app-input rounded-lg p-2.5 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block font-semibold text-[var(--text-muted)] mb-1">Primary Theme HEX</label>
-                  <input
-                    type="color"
-                    value={newTenantForm.primary_theme_color}
-                    onChange={(e) => setNewTenantForm({ ...newTenantForm, primary_theme_color: e.target.value })}
-                    className="w-full h-10 bg-[var(--bg-app)] border border-[var(--border-color)] rounded-lg p-1 cursor-pointer"
-                  />
-                </div>
-                <div>
                   <label className="block font-semibold text-[var(--text-muted)] mb-1">Support Phone</label>
                   <input
-                    type="text" placeholder="0300-1234567"
+                    type="text"
+                    placeholder="0300-1234567"
                     value={newTenantForm.branding_settings.support_phone}
                     onChange={(e) => setNewTenantForm({
                       ...newTenantForm,
@@ -561,71 +895,240 @@ export default function SuperAdminDashboard({ userRole, setUserRole }) {
                 </div>
               </div>
 
+              {/* Theme Color */}
+              <div>
+                <label className="block font-semibold text-[var(--text-muted)] mb-1">Primary Theme Color</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="color"
+                    value={newTenantForm.primary_theme_color}
+                    onChange={(e) => setNewTenantForm({ ...newTenantForm, primary_theme_color: e.target.value })}
+                    className="h-10 w-16 bg-[var(--bg-app)] border border-[var(--border-color)] rounded-lg p-1 cursor-pointer"
+                  />
+                  <span className="font-mono text-xs">{newTenantForm.primary_theme_color}</span>
+                </div>
+              </div>
+
               <button
                 type="submit"
-                className="w-full btn-accent text-white font-semibold py-3 rounded-lg mt-2 transition-all"
+                className="w-full btn-accent text-white font-bold py-3.5 rounded-xl mt-3 transition-all shadow-lg text-sm flex items-center justify-center gap-2"
               >
-                {newTenantForm.plan_type === "trial_7d" ? "Launch 7-Day Free Trial Environment" : "Provision Subdomain Environment"}
+                <Sparkles className="h-4 w-4" />
+                {newTenantForm.plan_type === "trial_7d" ? "Launch 7-Day Free Trial Environment" : "Provision Tenant Environment"}
               </button>
             </form>
           </div>
         </div>
       )}
 
-      {/* Configuration Settings Modal */}
+      {/* PROVISION SUCCESS & CREDENTIALS HANDOFF MODAL */}
+      {provisionedHandoff && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="glass-panel w-full max-w-lg rounded-2xl p-6 shadow-2xl space-y-5 border border-teal-500/40 animate-scale-up">
+            <div className="flex items-start gap-3">
+              <div className="h-10 w-10 rounded-xl bg-teal-500/10 border border-teal-500/30 flex items-center justify-center text-teal-400 shrink-0">
+                <CheckCircle className="h-6 w-6" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <span className="text-[10px] uppercase font-bold text-teal-400 bg-teal-500/10 px-2 py-0.5 rounded border border-teal-500/20">
+                  Ready & Initialized
+                </span>
+                <h3 className="text-xl font-bold mt-1 text-[var(--text-main)]">Tenant Provisioned Successfully!</h3>
+                <p className="text-xs text-[var(--text-muted)]">
+                  The tenant database environment is initialized. Deliver these credentials to the client.
+                </p>
+              </div>
+            </div>
+
+            {/* Credentials Card */}
+            <div className="p-4 rounded-xl border border-[var(--border-color)] bg-[var(--bg-app)] space-y-2.5 text-xs font-mono">
+              <div className="flex justify-between items-center py-1 border-b border-[var(--border-color)]">
+                <span className="text-[var(--text-muted)]">Agency Name:</span>
+                <span className="font-bold font-sans text-sm text-[var(--text-main)]">{provisionedHandoff.tenant.name}</span>
+              </div>
+              <div className="flex justify-between items-center py-1 border-b border-[var(--border-color)]">
+                <span className="text-[var(--text-muted)]">Subdomain URL:</span>
+                <a
+                  href={`https://${provisionedHandoff.credentials.subdomain}.racms.omnysync.com`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-bold text-teal-400 hover:underline"
+                >
+                  https://{provisionedHandoff.credentials.subdomain}.racms.omnysync.com
+                </a>
+              </div>
+              <div className="flex justify-between items-center py-1 border-b border-[var(--border-color)]">
+                <span className="text-[var(--text-muted)]">Username:</span>
+                <span className="font-bold text-[var(--text-main)]">{provisionedHandoff.credentials.username}</span>
+              </div>
+              <div className="flex justify-between items-center py-1 border-b border-[var(--border-color)]">
+                <span className="text-[var(--text-muted)]">Password:</span>
+                <span className="font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                  {provisionedHandoff.credentials.password}
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-1">
+                <span className="text-[var(--text-muted)]">Subscription:</span>
+                <span className="font-bold text-emerald-400">
+                  {provisionedHandoff.tenant.plan_type === "trial_7d" ? `7-Day Free Trial (Ends ${provisionedHandoff.tenant.trial_ends_at})` : "Active"}
+                </span>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="space-y-2 pt-2">
+              <button
+                type="button"
+                onClick={copyClientInvite}
+                className="w-full py-3 px-4 rounded-xl bg-teal-500/15 text-teal-400 border border-teal-500/30 hover:bg-teal-500/25 font-bold text-xs flex items-center justify-center gap-2 transition-all"
+              >
+                {copiedInvite ? <CheckCircle className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
+                {copiedInvite ? "Copied to Clipboard!" : "Copy Full WhatsApp / Email Client Invite"}
+              </button>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleLoginAsTenantClick(provisionedHandoff.tenant.id)}
+                  className="btn-accent text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-md"
+                >
+                  <ArrowRight className="h-4 w-4" /> Open & Login as Tenant
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setProvisionedHandoff(null)}
+                  className="py-2.5 rounded-xl border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-main)] font-semibold text-xs"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RESET PASSWORD MODAL */}
+      {resetTargetTenant && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="glass-panel w-full max-w-sm rounded-2xl p-6 shadow-2xl space-y-4 border border-[var(--border-color)]">
+            <div className="flex justify-between items-center pb-2 border-b border-[var(--border-color)]">
+              <div>
+                <h3 className="font-bold text-base">Reset Tenant Password</h3>
+                <p className="text-xs text-[var(--text-muted)]">{resetTargetTenant.name} ({resetTargetTenant.id})</p>
+              </div>
+              <button onClick={() => setResetTargetTenant(null)} className="text-[var(--text-muted)] hover:text-[var(--text-main)]">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleResetPasswordSubmit} className="space-y-3 text-xs">
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="font-semibold text-[var(--text-muted)]">New Password</label>
+                  <button
+                    type="button"
+                    onClick={() => setNewResetPassword(generatePassword(resetTargetTenant.name))}
+                    className="text-[10px] text-teal-400 hover:underline"
+                  >
+                    Generate New
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  required
+                  value={newResetPassword}
+                  onChange={(e) => setNewResetPassword(e.target.value)}
+                  className="w-full app-input rounded-lg p-2.5 font-mono text-xs focus:outline-none"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setResetTargetTenant(null)}
+                  className="w-1/2 py-2.5 rounded-xl border border-[var(--border-color)] font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={resetting}
+                  className="w-1/2 btn-accent text-white font-bold py-2.5 rounded-xl flex items-center justify-center gap-1"
+                >
+                  {resetting ? "Saving..." : "Save Password"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* TENANT CONFIGURATION MODAL */}
       {selectedTenant && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="glass-panel w-full max-w-xl rounded-2xl p-6 shadow-2xl space-y-5 border border-[var(--border-color)] max-h-[90vh] overflow-y-auto">
+          <div className="glass-panel w-full max-w-2xl rounded-2xl p-6 shadow-2xl space-y-5 border border-[var(--border-color)] max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center pb-3 border-b border-[var(--border-color)]">
               <div>
-                <h3 className="text-xl font-bold">Configure: {selectedTenant.name}</h3>
-                <p className="text-xs text-[var(--text-muted)] font-mono">{selectedTenant.id}.omnysync.com</p>
+                <h3 className="text-xl font-bold">{selectedTenant.name}</h3>
+                <span className="text-xs text-[var(--text-muted)] font-mono">{selectedTenant.id}.omnysync.com</span>
               </div>
               <button onClick={() => setSelectedTenant(null)} className="text-[var(--text-muted)] hover:text-[var(--text-main)] min-h-[44px] min-w-[44px] flex items-center justify-center">
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            {/* Config Tabs */}
-            <div className="flex border-b border-[var(--border-color)] gap-1">
+            <div className="flex border-b border-[var(--border-color)] gap-4 text-xs font-semibold">
               <button
                 onClick={() => setActiveTab("branding")}
-                className={`py-2 px-4 text-xs font-semibold transition-all border-b-2 flex items-center gap-1.5 min-h-[44px] ${
-                  activeTab === "branding"
-                    ? "border-teal-500 text-teal-500 font-bold"
-                    : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-main)]"
-                }`}
+                className={`pb-2.5 border-b-2 transition-all ${activeTab === "branding" ? "border-teal-500 text-teal-400" : "border-transparent text-[var(--text-muted)]"}`}
               >
-                <Palette className="h-3.5 w-3.5" /> Branding & Trial
+                Branding & Details
               </button>
               <button
                 onClick={() => setActiveTab("features")}
-                className={`py-2 px-4 text-xs font-semibold transition-all border-b-2 flex items-center gap-1.5 min-h-[44px] ${
-                  activeTab === "features"
-                    ? "border-teal-500 text-teal-500 font-bold"
-                    : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-main)]"
-                }`}
+                className={`pb-2.5 border-b-2 transition-all ${activeTab === "features" ? "border-teal-500 text-teal-400" : "border-transparent text-[var(--text-muted)]"}`}
               >
-                <Sliders className="h-3.5 w-3.5" /> Feature Toggles
+                Module Flags
               </button>
             </div>
 
-            {activeTab === "branding" ? (
+            {activeTab === "branding" && (
               <form onSubmit={handleBrandingSave} className="space-y-4 text-xs">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block font-semibold text-[var(--text-muted)] mb-1">Agency Name</label>
+                    <label className="block text-[var(--text-muted)] mb-1">Agency Name</label>
                     <input
                       type="text"
-                      value={selectedTenant.name || ""}
+                      value={selectedTenant.name}
                       onChange={(e) => setSelectedTenant({ ...selectedTenant, name: e.target.value })}
                       className="w-full app-input rounded-lg p-2.5 focus:outline-none"
                     />
                   </div>
                   <div>
-                    <label className="block font-semibold text-[var(--text-muted)] mb-1">Plan Type</label>
+                    <label className="block text-[var(--text-muted)] mb-1">Primary Theme Color</label>
+                    <input
+                      type="color"
+                      value={selectedTenant.primary_theme_color || "#0d9488"}
+                      onChange={(e) => setSelectedTenant({ ...selectedTenant, primary_theme_color: e.target.value })}
+                      className="w-full h-10 bg-[var(--bg-app)] border border-[var(--border-color)] rounded-lg p-1 cursor-pointer"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[var(--text-muted)] mb-1">Contact Person</label>
+                    <input
+                      type="text"
+                      value={selectedTenant.contact_name}
+                      onChange={(e) => setSelectedTenant({ ...selectedTenant, contact_name: e.target.value })}
+                      className="w-full app-input rounded-lg p-2.5 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[var(--text-muted)] mb-1">Plan</label>
                     <select
-                      value={selectedTenant.plan_type || "standard"}
+                      value={selectedTenant.plan_type}
                       onChange={(e) => setSelectedTenant({ ...selectedTenant, plan_type: e.target.value })}
                       className="w-full app-input rounded-lg p-2.5 focus:outline-none"
                     >
@@ -637,138 +1140,37 @@ export default function SuperAdminDashboard({ userRole, setUserRole }) {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-3 p-3 rounded-xl bg-[var(--tr-hover)]/30 border border-[var(--border-color)]">
-                  <div>
-                    <label className="block font-semibold text-[var(--text-muted)] mb-1">Subscription Status</label>
-                    <select
-                      value={selectedTenant.subscription_status || "active"}
-                      onChange={(e) => setSelectedTenant({ ...selectedTenant, subscription_status: e.target.value })}
-                      className="w-full app-input rounded-lg p-2 focus:outline-none"
-                    >
-                      <option value="trialing">Trialing</option>
-                      <option value="active">Active (Paid)</option>
-                      <option value="expired">Expired</option>
-                      <option value="suspended">Suspended</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block font-semibold text-[var(--text-muted)] mb-1">Trial Ends On</label>
-                    <input
-                      type="date"
-                      value={selectedTenant.trial_ends_at || ""}
-                      onChange={(e) => setSelectedTenant({ ...selectedTenant, trial_ends_at: e.target.value })}
-                      className="w-full app-input rounded-lg p-2 focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-semibold text-[var(--text-muted)] mb-1">Account Access</label>
-                    <select
-                      value={selectedTenant.is_active ? "true" : "false"}
-                      onChange={(e) => setSelectedTenant({ ...selectedTenant, is_active: e.target.value === "true" })}
-                      className="w-full app-input rounded-lg p-2 focus:outline-none"
-                    >
-                      <option value="true">Enabled</option>
-                      <option value="false">Disabled</option>
-                    </select>
-                  </div>
+                <div className="flex justify-end gap-2 pt-3">
+                  <button type="button" onClick={() => setSelectedTenant(null)} className="px-4 py-2 rounded-lg border border-[var(--border-color)]">
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn-accent px-5 py-2 rounded-lg font-bold text-white">
+                    Save Changes
+                  </button>
                 </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block font-semibold text-[var(--text-muted)] mb-1">Primary Theme Color</label>
-                    <div className="flex gap-2 items-center">
-                      <input
-                        type="color"
-                        value={selectedTenant.primary_theme_color || "#0d9488"}
-                        onChange={(e) => setSelectedTenant({ ...selectedTenant, primary_theme_color: e.target.value })}
-                        className="w-10 h-10 bg-[var(--bg-app)] border border-[var(--border-color)] rounded-lg p-1 cursor-pointer"
-                      />
-                      <input
-                        type="text"
-                        value={selectedTenant.primary_theme_color || "#0d9488"}
-                        onChange={(e) => setSelectedTenant({ ...selectedTenant, primary_theme_color: e.target.value })}
-                        className="flex-1 app-input rounded-lg p-2.5 font-mono focus:outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-[var(--text-muted)] mb-1">Company Logo URL</label>
-                    <input
-                      type="text"
-                      value={selectedTenant.logo_url || ""}
-                      onChange={(e) => setSelectedTenant({ ...selectedTenant, logo_url: e.target.value })}
-                      className="w-full app-input rounded-lg p-2.5 font-mono focus:outline-none"
-                      placeholder="/images/custom-logo.png"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block font-semibold text-[var(--text-muted)] mb-1">Support Email</label>
-                    <input
-                      type="email"
-                      value={selectedTenant.branding_settings?.support_email || ""}
-                      onChange={(e) => updateBrandingSetting("support_email", e.target.value)}
-                      className="w-full app-input rounded-lg p-2.5 focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-semibold text-[var(--text-muted)] mb-1">Support Phone</label>
-                    <input
-                      type="text"
-                      value={selectedTenant.branding_settings?.support_phone || ""}
-                      onChange={(e) => updateBrandingSetting("support_phone", e.target.value)}
-                      className="w-full app-input rounded-lg p-2.5 focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full btn-accent text-white font-semibold py-3 rounded-lg mt-2 transition-all"
-                >
-                  Save Tenant Settings & Subscription
-                </button>
               </form>
-            ) : (
-              <div className="space-y-4 text-xs max-h-[60vh] overflow-y-auto pr-1">
-                <div className="space-y-3">
-                  <h5 className="font-bold text-teal-500 border-b border-[var(--border-color)] pb-1.5 uppercase tracking-wider text-[10px]">Platform Modules</h5>
-                  {[
-                    { flag: "dashboard", label: "Dashboard Hub", desc: "Main KPIs, fleet alerts and live overview" },
-                    { flag: "fleet", label: "Fleet & Chassis Management", desc: "Vehicles, chassis numbers, odometer & docs" },
-                    { flag: "customers", label: "Customers & KYC / Guarantors", desc: "Client profiles, cheque, passport & 2 guarantors details" },
-                    { flag: "leads", label: "Leads CRM", desc: "Prospects pipeline, follow-ups & conversion" },
-                    { flag: "quotations", label: "Invoice Quotations", desc: "PDF price estimates and client quotes" },
-                    { flag: "bookings", label: "Bookings Scheduler", desc: "Reservations, contracts & billing" },
-                    { flag: "receipts", label: "Receipt Generator", desc: "Official payment, deposit & refund receipts" },
-                    { flag: "employees", label: "Employee & Payroll Management", desc: "Staff, drivers, salaries & payment logs" },
-                    { flag: "maintenance", label: "Maintenance & Tax Ledger", desc: "Service logs, oil alerts & token tax" },
-                    { flag: "blacklist", label: "Blacklist Shield", desc: "High-risk CNIC blocklist" },
-                    { flag: "whatsapp_api", label: "WhatsApp Messaging", desc: "Direct WhatsApp receipts, quotes & follow-ups" },
-                    { flag: "advanced_analytics", label: "Vehicle Lifecycle Analytics", desc: "Revenue charts and profit reports" },
-                    { flag: "chauffeur_module", label: "Chauffeur Rental Module", desc: "Chauffeur daily wage calculations" },
-                    { flag: "suppliers", label: "Suppliers & Sublet Deals", desc: "Outsourced cars, supplier rent costs, client markups & net profit" }
-                  ].map(mod => {
-                    const isEnabled = (selectedTenant.feature_flags || []).includes(mod.flag);
+            )}
+
+            {activeTab === "features" && (
+              <div className="space-y-3">
+                <p className="text-xs text-[var(--text-muted)]">Toggle which features and views are active for this tenant:</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {ALL_FLAGS.map(flag => {
+                    const active = (selectedTenant.feature_flags || []).includes(flag);
                     return (
-                      <div key={mod.flag} className="flex justify-between items-center p-3 bg-[var(--tr-hover)]/30 border border-[var(--border-color)] rounded-xl">
-                        <div className="flex-1 pr-4">
-                          <h5 className="font-bold text-[var(--text-main)] text-xs">{mod.label}</h5>
-                          <p className="text-[10px] text-[var(--text-muted)] mt-0.5">{mod.desc}</p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleFeatureToggle(mod.flag)}
-                          className={`w-12 h-6 rounded-full p-1 transition-all flex items-center ${
-                            isEnabled ? "bg-teal-500 justify-end" : "bg-slate-700 justify-start"
-                          }`}
-                        >
-                          <span className="inline-block w-4 h-4 bg-white rounded-full shadow-md"></span>
-                        </button>
-                      </div>
+                      <button
+                        key={flag}
+                        type="button"
+                        onClick={() => handleFeatureToggle(flag)}
+                        className={`p-2.5 rounded-xl border text-left text-xs font-semibold flex items-center justify-between transition-all ${
+                          active
+                            ? "bg-teal-500/15 border-teal-500/30 text-teal-400"
+                            : "bg-[var(--bg-app)] border-[var(--border-color)] text-[var(--text-muted)]"
+                        }`}
+                      >
+                        <span className="capitalize">{flag.replace(/_/g, " ")}</span>
+                        <CheckCircle className={`h-4 w-4 ${active ? "opacity-100" : "opacity-20"}`} />
+                      </button>
                     );
                   })}
                 </div>
@@ -777,7 +1179,6 @@ export default function SuperAdminDashboard({ userRole, setUserRole }) {
           </div>
         </div>
       )}
-
     </div>
   );
 }

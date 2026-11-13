@@ -413,7 +413,11 @@ def get_tenants(db: Session, skip: int = 0, limit: int = 100):
     return db.query(models.Tenant).offset(skip).limit(limit).all()
 
 def create_tenant(db: Session, tenant: schemas.TenantCreate):
-    db_tenant = models.Tenant(**tenant.dict())
+    data = tenant.dict()
+    data.pop("admin_username", None)
+    data.pop("admin_password", None)
+    data.pop("admin_email", None)
+    db_tenant = models.Tenant(**data)
     db.add(db_tenant)
     db.commit()
     db.refresh(db_tenant)

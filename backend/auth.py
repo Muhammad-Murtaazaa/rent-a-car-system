@@ -3,24 +3,32 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict
 from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import bcrypt
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 
 # Security configurations
 SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "super-secret-key-change-in-production")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days session
+SUPER_ADMIN_PASSWORD = os.environ.get("SUPER_ADMIN_PASSWORD", "OmnysyncSuper2026!")
 # Offline shop default: allow header role/tenant (local LAN). Set ALLOW_DEMO_AUTH=0 for internet deploy.
 ALLOW_DEMO_AUTH = os.environ.get("ALLOW_DEMO_AUTH", "1").strip() not in ("0", "false", "False", "no")
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer(auto_error=False)
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    pwd_bytes = (password or "").encode("utf-8")[:72]
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(pwd_bytes, salt).decode("utf-8")
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    if not plain_password or not hashed_password:
+        return False
+    try:
+        pwd_bytes = plain_password.encode("utf-8")[:72]
+        return bcrypt.checkpw(pwd_bytes, hashed_password.encode("utf-8"))
+    except Exception:
+        return False
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
@@ -120,11 +128,20 @@ def require_roles(allowed_roles: list[str]):
         return tenant_context
     return dependency
 
-def require_super_admin(tenant_context: dict = Depends(get_tenant_context)):
-    role = tenant_context.get("role")
-    if role != "super_admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access forbidden: Super Admin rights required"
-        )
-    return tenant_context
+def require_super_admin(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    x_test_role: Optional[str] = Header(None, alias="X-Test-Role")
+):
+    if credentials:
+        try:
+            payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+            if payload.get("role") == "super_admin":
+                return payload
+        except JWTError:
+            pass
+    if ALLOW_DEMO_AUTH and x_test_role == "super_admin":
+        return {"sub": "super_admin", "role": "super_admin", "tenant_id": "system"}
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Super Admin access denied. Super Admin authentication required."
+    )

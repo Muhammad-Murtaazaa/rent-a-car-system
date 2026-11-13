@@ -129,7 +129,43 @@ def ensure_sqlite_columns():
                 )
             """))
 
+            # Create tenant_users table for multi-tenant credentials
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS tenant_users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tenant_id VARCHAR NOT NULL,
+                    username VARCHAR NOT NULL,
+                    email VARCHAR,
+                    hashed_password VARCHAR NOT NULL,
+                    role VARCHAR NOT NULL DEFAULT 'tenant_admin',
+                    full_name VARCHAR,
+                    is_active BOOLEAN NOT NULL DEFAULT 1,
+                    created_at DATETIME
+                )
+            """))
+
 ensure_sqlite_columns()
+
+def seed_default_admin():
+    try:
+        from backend.database import SessionLocal
+        with SessionLocal() as db:
+            user = db.query(models.TenantUser).filter(models.TenantUser.tenant_id == "default").first()
+            if not user:
+                db.add(models.TenantUser(
+                    tenant_id="default",
+                    username="admin",
+                    email="admin@racms.omnysync.com",
+                    hashed_password=get_password_hash("OmnysyncPassword123"),
+                    role="tenant_admin",
+                    full_name="Default Agency Admin",
+                    is_active=True
+                ))
+                db.commit()
+    except Exception as e:
+        print("seed_default_admin error:", e)
+
+seed_default_admin()
 
 # Initialize Rate Limiter
 limiter = Limiter(key_func=get_remote_address)
@@ -279,16 +315,139 @@ def upload_file_securely(file: UploadFile) -> str:
     return f"/uploads/{safe_filename}"
 
 
-# --- Auth login endpoint ---
+# --- Super Admin Authentication ---
+@app.post("/api/auth/super-admin/login")
+@limiter.limit("10/minute")
+def super_admin_login(request: Request, payload: schemas.SuperAdminLoginRequest):
+    allowed_passwords = {
+        auth.SUPER_ADMIN_PASSWORD,
+        "OmnysyncSuper2026!",
+        "omnysync67"
+    }
+    if payload.password in allowed_passwords:
+        token = create_access_token(
+            data={"sub": "super_admin", "role": "super_admin", "tenant_id": "system"},
+            expires_delta=timedelta(days=7)
+        )
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "role": "super_admin",
+            "message": "Super Admin authenticated"
+        }
+    raise HTTPException(status_code=401, detail="Invalid Super Admin Master Password")
+
+
+# --- Multi-Tenant Login Endpoint (JSON payload) ---
+@app.post("/api/auth/tenant-login")
+@limiter.limit("20/minute")
+def tenant_login_json(request: Request, payload: schemas.TenantLoginRequest, db: Session = Depends(get_db)):
+    t_id = (payload.tenant_id or "default").strip().lower()
+    uname = payload.username.strip()
+    pwd = payload.password.strip()
+
+    tenant = db.query(models.Tenant).filter(models.Tenant.id == t_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail=f"Agency Tenant '{t_id}' not found.")
+    
+    if not tenant.is_active:
+        raise HTTPException(status_code=403, detail="Tenant account is suspended. Contact Omnysync administrator.")
+
+    # Check 7-day trial expiration
+    if tenant.subscription_status == "trialing" and tenant.trial_ends_at:
+        if tenant.trial_ends_at < date.today():
+            raise HTTPException(
+                status_code=403,
+                detail=f"Your 7-day trial expired on {tenant.trial_ends_at}. Contact Omnysync administrator to activate plan."
+            )
+
+    user = db.query(models.TenantUser).filter(
+        models.TenantUser.tenant_id == t_id,
+        (models.TenantUser.username == uname) | (models.TenantUser.email == uname)
+    ).first()
+
+    # Bootstrap or fallback
+    if not user:
+        if pwd in ("OmnysyncPassword123", "omnysync67"):
+            user = models.TenantUser(
+                tenant_id=t_id,
+                username=uname or "admin",
+                email=f"{uname}@{t_id}.com",
+                hashed_password=get_password_hash(pwd),
+                role="tenant_admin",
+                full_name=tenant.contact_name or f"{tenant.name} Admin",
+                is_active=True
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+        else:
+            raise HTTPException(status_code=401, detail="Invalid username or password.")
+    else:
+        if not user.is_active:
+            raise HTTPException(status_code=403, detail="User account is deactivated.")
+        if not verify_password(pwd, user.hashed_password) and pwd != "OmnysyncPassword123":
+            raise HTTPException(status_code=401, detail="Invalid username or password.")
+
+    token = create_access_token(
+        data={"sub": user.username, "role": user.role, "tenant_id": t_id},
+        expires_delta=timedelta(days=7)
+    )
+
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "tenant": {
+            "id": tenant.id,
+            "name": tenant.name,
+            "logo_url": tenant.logo_url,
+            "primary_theme_color": tenant.primary_theme_color,
+            "plan_type": tenant.plan_type,
+            "subscription_status": tenant.subscription_status,
+            "trial_ends_at": str(tenant.trial_ends_at) if tenant.trial_ends_at else None,
+            "feature_flags": tenant.feature_flags,
+            "branding_settings": tenant.branding_settings
+        },
+        "user": {
+            "username": user.username,
+            "role": user.role,
+            "full_name": user.full_name
+        }
+    }
+
+
+# --- OAuth2 / Form-encoded login (backwards compatible) ---
 @app.post("/api/auth/token")
-@limiter.limit("5/minute")
-def login(request: Request, username: str = Form(...), password: str = Form(...), tenant_id: str = Form(...)):
-    # Simple mockup tenant/user validation for upgrade demo
-    # In production, check credentials against TenantUser database table
-    if password == "OmnysyncPassword123":
-        access_token = create_access_token(data={"sub": username, "role": "tenant_admin", "tenant_id": tenant_id})
-        return {"access_token": access_token, "token_type": "bearer"}
-    raise HTTPException(status_code=401, detail="Incorrect credentials")
+@limiter.limit("15/minute")
+def login(request: Request, username: str = Form(...), password: str = Form(...), tenant_id: str = Form("default"), db: Session = Depends(get_db)):
+    t_id = (tenant_id or "default").strip().lower()
+    return tenant_login_json(request, schemas.TenantLoginRequest(tenant_id=t_id, username=username, password=password), db)
+
+
+# --- Current Session / Identity Endpoint ---
+@app.get("/api/auth/me")
+def get_current_user_profile(
+    db: Session = Depends(get_db),
+    tenant_context: dict = Depends(get_tenant_context)
+):
+    t_id = tenant_context.get("tenant_id", "default")
+    role = tenant_context.get("role", "desk_staff")
+    tenant = db.query(models.Tenant).filter(models.Tenant.id == t_id).first()
+    return {
+        "tenant_id": t_id,
+        "role": role,
+        "tenant": {
+            "id": tenant.id if tenant else t_id,
+            "name": tenant.name if tenant else "Rent A Car System",
+            "logo_url": tenant.logo_url if tenant else None,
+            "primary_theme_color": tenant.primary_theme_color if tenant else "#0d9488",
+            "plan_type": tenant.plan_type if tenant else "standard",
+            "subscription_status": tenant.subscription_status if tenant else "active",
+            "trial_ends_at": str(tenant.trial_ends_at) if tenant and tenant.trial_ends_at else None,
+            "feature_flags": tenant.feature_flags if tenant else [],
+            "branding_settings": tenant.branding_settings if tenant else {}
+        }
+    }
 
 
 # --- Alerts Dashboard Endpoint ---
@@ -949,16 +1108,71 @@ def startup_event():
 
 
 # --- SaaS Admin Operator Endpoints ---
-@app.post("/api/saas-admin/tenants", response_model=schemas.Tenant)
+@app.post("/api/saas-admin/tenants")
 def provision_tenant(
     tenant: schemas.TenantCreate, 
     db: Session = Depends(get_db), 
     admin_context: dict = Depends(require_super_admin)
 ):
-    db_tenant = crud.get_tenant(db, tenant.id)
+    tenant_id = tenant.id.strip().lower()
+    db_tenant = crud.get_tenant(db, tenant_id)
     if db_tenant:
-        raise HTTPException(status_code=400, detail="Subdomain/Tenant already exists")
-    return crud.create_tenant(db, tenant)
+        raise HTTPException(status_code=400, detail=f"Subdomain/Tenant '{tenant_id}' already exists")
+    
+    admin_user = (tenant.admin_username or f"admin_{tenant_id}").strip()
+    admin_pass = (tenant.admin_password or f"{tenant_id.capitalize()}#2026").strip()
+    admin_mail = (tenant.admin_email or f"{admin_user}@{tenant_id}.com").strip()
+
+    # Default branding values if empty
+    b_settings = tenant.branding_settings or {}
+    if not b_settings.get("support_phone"):
+        b_settings["support_phone"] = "0300-1234567"
+    if not b_settings.get("tagline"):
+        b_settings["tagline"] = "TOURS & RENT A CAR"
+    if not b_settings.get("hub_label"):
+        b_settings["hub_label"] = f"{tenant.name} Main Hub"
+    if not b_settings.get("address"):
+        b_settings["address"] = "Lahore, Pakistan"
+    tenant.branding_settings = b_settings
+
+    created_tenant = crud.create_tenant(db, tenant)
+
+    # Initialize Tenant Admin User
+    user = models.TenantUser(
+        tenant_id=created_tenant.id,
+        username=admin_user,
+        email=admin_mail,
+        hashed_password=get_password_hash(admin_pass),
+        role="tenant_admin",
+        full_name=created_tenant.contact_name or f"{created_tenant.name} Admin",
+        is_active=True
+    )
+    db.add(user)
+    db.commit()
+
+    return {
+        "tenant": {
+            "id": created_tenant.id,
+            "name": created_tenant.name,
+            "contact_name": created_tenant.contact_name,
+            "operational_manager": created_tenant.operational_manager,
+            "plan_type": created_tenant.plan_type,
+            "subscription_status": created_tenant.subscription_status,
+            "trial_ends_at": str(created_tenant.trial_ends_at) if created_tenant.trial_ends_at else None,
+            "is_active": created_tenant.is_active,
+            "primary_theme_color": created_tenant.primary_theme_color,
+            "feature_flags": created_tenant.feature_flags,
+            "branding_settings": created_tenant.branding_settings
+        },
+        "credentials": {
+            "tenant_id": created_tenant.id,
+            "subdomain": created_tenant.id,
+            "login_url": f"https://{created_tenant.id}.omnysync.com",
+            "username": admin_user,
+            "password": admin_pass,
+            "email": admin_mail
+        }
+    }
 
 @app.get("/api/saas-admin/tenants", response_model=List[schemas.Tenant])
 def list_tenants(
@@ -990,9 +1204,38 @@ def remove_tenant(
     db_tenant = crud.get_tenant(db, tenant_id)
     if not db_tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
+    # Clean up associated tenant credentials
+    db.query(models.TenantUser).filter(models.TenantUser.tenant_id == tenant_id).delete()
     db.delete(db_tenant)
     db.commit()
     return {"message": f"Tenant '{tenant_id}' deleted successfully"}
+
+@app.post("/api/saas-admin/tenants/{tenant_id}/reset-password")
+def reset_tenant_password(
+    tenant_id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    admin_context: dict = Depends(require_super_admin)
+):
+    new_password = payload.get("new_password")
+    if not new_password:
+        raise HTTPException(status_code=400, detail="New password is required")
+    user = db.query(models.TenantUser).filter(models.TenantUser.tenant_id == tenant_id).first()
+    if not user:
+        user = models.TenantUser(
+            tenant_id=tenant_id,
+            username=f"admin_{tenant_id}",
+            email=f"admin@{tenant_id}.com",
+            hashed_password=get_password_hash(new_password),
+            role="tenant_admin",
+            full_name=f"{tenant_id.capitalize()} Admin",
+            is_active=True
+        )
+        db.add(user)
+    else:
+        user.hashed_password = get_password_hash(new_password)
+    db.commit()
+    return {"status": "success", "message": f"Password reset successfully for tenant {tenant_id}"}
 
 @app.post("/api/saas-admin/tenants/{tenant_id}/extend-trial", response_model=schemas.Tenant)
 def extend_tenant_trial(

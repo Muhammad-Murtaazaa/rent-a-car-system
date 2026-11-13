@@ -52,6 +52,55 @@ export default function App() {
   });
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [historyCarId, setHistoryCarId] = useState(null);
+
+  // Tenant Authentication & Multi-Tenant Scope State
+  const [showTenantLoginModal, setShowTenantLoginModal] = useState(false);
+  const [tenantLoginForm, setTenantLoginForm] = useState(() => ({
+    tenant_id: (typeof window !== "undefined" && localStorage.getItem("active_tenant_id")) || "default",
+    username: "",
+    password: ""
+  }));
+  const [tenantLoginError, setTenantLoginError] = useState("");
+  const [tenantLoggingIn, setTenantLoggingIn] = useState(false);
+
+  const handleTenantLoginSubmit = async (e) => {
+    e.preventDefault();
+    setTenantLoggingIn(true);
+    setTenantLoginError("");
+    try {
+      const res = await fetch("/api/auth/tenant-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tenant_id: tenantLoginForm.tenant_id.trim().toLowerCase(),
+          username: tenantLoginForm.username.trim(),
+          password: tenantLoginForm.password.trim()
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        localStorage.setItem("active_tenant_id", data.tenant.id);
+        localStorage.setItem("tenant_token", data.access_token);
+        localStorage.setItem("tenant_user", JSON.stringify(data.user));
+        setShowTenantLoginModal(false);
+        window.location.reload();
+      } else {
+        const err = await res.json();
+        setTenantLoginError(err.detail || "Invalid login credentials.");
+      }
+    } catch {
+      setTenantLoginError("Network connection error.");
+    } finally {
+      setTenantLoggingIn(false);
+    }
+  };
+
+  const handleTenantLogout = () => {
+    localStorage.removeItem("tenant_token");
+    localStorage.removeItem("tenant_user");
+    localStorage.setItem("active_tenant_id", "default");
+    window.location.reload();
+  };
   
   const [branding, setBranding] = useState({
     name: "Rent A Car Management System",
@@ -443,7 +492,20 @@ export default function App() {
   };
 
   if (userRole === "super_admin") {
-    return <SuperAdminDashboard userRole={userRole} setUserRole={setUserRole} />;
+    return (
+      <SuperAdminDashboard
+        userRole={userRole}
+        setUserRole={setUserRole}
+        onLoginAsTenant={(tId) => {
+          localStorage.setItem("active_tenant_id", tId);
+          setUserRole("tenant_admin");
+          if (typeof window !== "undefined") {
+            window.location.hash = "";
+            window.location.reload();
+          }
+        }}
+      />
+    );
   }
 
   if (branding.is_active === false || branding.subscription_status === "expired" || branding.subscription_status === "suspended") {
@@ -672,6 +734,45 @@ export default function App() {
               <option value="desk_staff">Desk Staff</option>
               <option value="super_admin">Super Admin</option>
             </select>
+          </div>
+
+          {/* Active Tenant Scope & Authentication Card */}
+          <div className="p-2.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-app)] text-left space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] uppercase font-bold text-[var(--text-muted)] tracking-wider">Tenant Scope</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-teal-500/10 text-teal-400 font-bold border border-teal-500/20">
+                {(typeof window !== "undefined" && localStorage.getItem("active_tenant_id")) || "default"}
+              </span>
+            </div>
+            <div className="font-bold text-xs truncate text-[var(--text-main)]">
+              {branding.name || "Agency Workspace"}
+            </div>
+            <div className="flex items-center gap-1.5 pt-0.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setTenantLoginForm({
+                    tenant_id: (typeof window !== "undefined" && localStorage.getItem("active_tenant_id")) || "default",
+                    username: "",
+                    password: ""
+                  });
+                  setShowTenantLoginModal(true);
+                }}
+                className="w-full py-1 px-2 rounded-lg bg-[var(--tr-hover)] hover:bg-teal-500/10 hover:text-teal-400 border border-[var(--border-color)] text-[10px] font-bold text-center transition-colors"
+              >
+                🔑 Login / Switch Tenant
+              </button>
+              {(typeof window !== "undefined" && localStorage.getItem("tenant_token")) && (
+                <button
+                  type="button"
+                  onClick={handleTenantLogout}
+                  title="Log out of this tenant"
+                  className="py-1 px-2 rounded-lg border border-rose-500/20 text-rose-500 hover:bg-rose-500/10 text-[10px] font-bold shrink-0"
+                >
+                  Exit
+                </button>
+              )}
+            </div>
           </div>
           {/* PWA Offline & Sync Indicator */}
           <div className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-app)] text-[11px]">
@@ -1152,6 +1253,83 @@ export default function App() {
           carId={historyCarId} 
           userRole={userRole} 
         />
+
+        {/* TENANT LOGIN / SCOPE SWITCH MODAL */}
+        {showTenantLoginModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div className="glass-panel w-full max-w-md rounded-2xl p-6 shadow-2xl space-y-5 border border-[var(--border-color)] animate-scale-up">
+              <div className="flex justify-between items-center pb-3 border-b border-[var(--border-color)]">
+                <div>
+                  <h3 className="font-bold text-lg text-[var(--text-main)]">Agency Workspace Login</h3>
+                  <p className="text-xs text-[var(--text-muted)]">Sign in with your tenant subdomain and credentials</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowTenantLoginModal(false)}
+                  className="text-[var(--text-muted)] hover:text-[var(--text-main)] min-h-[44px] min-w-[44px] flex items-center justify-center"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleTenantLoginSubmit} className="space-y-4 text-xs">
+                <div>
+                  <label className="block font-semibold text-[var(--text-muted)] mb-1">Tenant Subdomain / ID *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. azeem or default"
+                    value={tenantLoginForm.tenant_id}
+                    onChange={(e) => setTenantLoginForm({ ...tenantLoginForm, tenant_id: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "") })}
+                    className="w-full app-input rounded-xl p-2.5 font-mono text-sm focus:outline-none"
+                  />
+                  <span className="text-[10px] text-[var(--text-muted)] mt-1 block">
+                    URL: {tenantLoginForm.tenant_id || "agency"}.racms.omnysync.com
+                  </span>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-[var(--text-muted)] mb-1">Username / Email *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="admin@agency.com"
+                    value={tenantLoginForm.username}
+                    onChange={(e) => setTenantLoginForm({ ...tenantLoginForm, username: e.target.value })}
+                    className="w-full app-input rounded-xl p-2.5 text-sm focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-[var(--text-muted)] mb-1">Password *</label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="Enter password"
+                    value={tenantLoginForm.password}
+                    onChange={(e) => setTenantLoginForm({ ...tenantLoginForm, password: e.target.value })}
+                    className="w-full app-input rounded-xl p-2.5 text-sm focus:outline-none font-mono"
+                  />
+                </div>
+
+                {tenantLoginError && (
+                  <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-500 text-xs font-semibold">
+                    {tenantLoginError}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={tenantLoggingIn}
+                  className="w-full btn-accent text-white font-bold py-3 rounded-xl text-sm flex items-center justify-center gap-2 shadow-lg transition-all"
+                >
+                  {tenantLoggingIn ? <RefreshCw className="h-4 w-4 animate-spin" /> : null}
+                  {tenantLoggingIn ? "Logging in..." : "Log In to Workspace"}
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

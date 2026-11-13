@@ -291,7 +291,35 @@ class TenantBase(BaseModel):
     branding_settings: Dict[str, str] = {}
 
 class TenantCreate(TenantBase):
-    pass
+    admin_username: Optional[str] = None
+    admin_password: Optional[str] = None
+    admin_email: Optional[str] = None
+
+class SuperAdminLoginRequest(BaseModel):
+    password: str
+
+class TenantLoginRequest(BaseModel):
+    tenant_id: str
+    username: str
+    password: str
+
+class TenantUserBase(BaseModel):
+    tenant_id: str
+    username: str
+    email: Optional[str] = None
+    role: str = "tenant_admin"
+    full_name: Optional[str] = None
+    is_active: bool = True
+
+class TenantUserCreate(TenantUserBase):
+    password: str
+
+class TenantUser(TenantUserBase):
+    id: int
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
 
 class TenantUpdate(BaseModel):
     name: Optional[str] = None
