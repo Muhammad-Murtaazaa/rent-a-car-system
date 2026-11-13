@@ -22,9 +22,9 @@ from slowapi.errors import RateLimitExceeded
 import boto3
 from botocore.exceptions import NoCredentialsError
 
-from backend import models, schemas, crud
+from backend import models, schemas, crud, auth
 from backend.database import engine, get_db
-from backend.auth import get_tenant_context, create_access_token, verify_password, get_password_hash, require_super_admin
+from backend.auth import get_tenant_context, create_access_token, verify_password, get_password_hash, require_super_admin, SUPER_ADMIN_PASSWORD
 
 # Create the tables
 models.Base.metadata.create_all(bind=engine)
