@@ -1122,3 +1122,65 @@ def delete_supplier_deal(db: Session, deal_id: int, tenant_id: str):
         db.commit()
     return db_deal
 
+# --- Partner Agencies (Other Rent-A-Cars) ---
+def get_partner_agencies(db: Session, tenant_id: str):
+    return db.query(models.PartnerAgency).filter(models.PartnerAgency.tenant_id == tenant_id).order_by(models.PartnerAgency.created_at.desc()).all()
+
+def get_partner_agency(db: Session, agency_id: int, tenant_id: str):
+    return db.query(models.PartnerAgency).filter(models.PartnerAgency.id == agency_id, models.PartnerAgency.tenant_id == tenant_id).first()
+
+def create_partner_agency(db: Session, agency: schemas.PartnerAgencyCreate, tenant_id: str):
+    db_agency = models.PartnerAgency(**agency.dict(), tenant_id=tenant_id)
+    db.add(db_agency)
+    db.commit()
+    db.refresh(db_agency)
+    return db_agency
+
+def update_partner_agency(db: Session, agency_id: int, agency_update: schemas.PartnerAgencyUpdate, tenant_id: str):
+    db_agency = get_partner_agency(db, agency_id, tenant_id)
+    if not db_agency:
+        return None
+    for k, v in agency_update.dict(exclude_unset=True).items():
+        setattr(db_agency, k, v)
+    db.commit()
+    db.refresh(db_agency)
+    return db_agency
+
+def delete_partner_agency(db: Session, agency_id: int, tenant_id: str):
+    db_agency = get_partner_agency(db, agency_id, tenant_id)
+    if db_agency:
+        db.delete(db_agency)
+        db.commit()
+    return db_agency
+
+# --- Chauffeurs & Drivers Directory ---
+def get_drivers(db: Session, tenant_id: str):
+    return db.query(models.ChauffeurDriver).filter(models.ChauffeurDriver.tenant_id == tenant_id).order_by(models.ChauffeurDriver.created_at.desc()).all()
+
+def get_driver(db: Session, driver_id: int, tenant_id: str):
+    return db.query(models.ChauffeurDriver).filter(models.ChauffeurDriver.id == driver_id, models.ChauffeurDriver.tenant_id == tenant_id).first()
+
+def create_driver(db: Session, driver: schemas.ChauffeurDriverCreate, tenant_id: str):
+    db_driver = models.ChauffeurDriver(**driver.dict(), tenant_id=tenant_id)
+    db.add(db_driver)
+    db.commit()
+    db.refresh(db_driver)
+    return db_driver
+
+def update_driver(db: Session, driver_id: int, driver_update: schemas.ChauffeurDriverUpdate, tenant_id: str):
+    db_driver = get_driver(db, driver_id, tenant_id)
+    if not db_driver:
+        return None
+    for k, v in driver_update.dict(exclude_unset=True).items():
+        setattr(db_driver, k, v)
+    db.commit()
+    db.refresh(db_driver)
+    return db_driver
+
+def delete_driver(db: Session, driver_id: int, tenant_id: str):
+    db_driver = get_driver(db, driver_id, tenant_id)
+    if db_driver:
+        db.delete(db_driver)
+        db.commit()
+    return db_driver
+

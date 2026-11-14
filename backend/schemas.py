@@ -885,3 +885,79 @@ class SupplierDeal(SupplierDealBase):
 
     class Config:
         from_attributes = True
+
+# Partner Rent A Cars (Other Agencies)
+class PartnerAgencyBase(BaseModel):
+    agency_name: str
+    contact_person: Optional[str] = None
+    phone: str
+    whatsapp: Optional[str] = None
+    city: Optional[str] = "Lahore"
+    address: Optional[str] = None
+    total_cars_count: int = 0
+    available_cars_json: Optional[str] = "[]"
+    commission_terms: Optional[str] = None
+    notes: Optional[str] = None
+
+class PartnerAgencyCreate(PartnerAgencyBase):
+    pass
+
+class PartnerAgencyUpdate(BaseModel):
+    agency_name: Optional[str] = None
+    contact_person: Optional[str] = None
+    phone: Optional[str] = None
+    whatsapp: Optional[str] = None
+    city: Optional[str] = None
+    address: Optional[str] = None
+    total_cars_count: Optional[int] = None
+    available_cars_json: Optional[str] = None
+    commission_terms: Optional[str] = None
+    notes: Optional[str] = None
+
+class PartnerAgency(PartnerAgencyBase):
+    id: int
+    tenant_id: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+# Chauffeurs / Drivers Directory
+class ChauffeurDriverBase(BaseModel):
+    name: str
+    phone: str
+    cnic: Optional[str] = None
+    license_number: Optional[str] = None
+    license_expiry: Optional[str] = None
+    daily_wage: float = 0.0
+    status: str = "Available"
+    driver_type: str = "Freelance"
+    agency_affiliation: Optional[str] = None
+    experience_years: Optional[int] = 0
+    specialties: Optional[str] = None
+    notes: Optional[str] = None
+
+class ChauffeurDriverCreate(ChauffeurDriverBase):
+    pass
+
+class ChauffeurDriverUpdate(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    cnic: Optional[str] = None
+    license_number: Optional[str] = None
+    license_expiry: Optional[str] = None
+    daily_wage: Optional[float] = None
+    status: Optional[str] = None
+    driver_type: Optional[str] = None
+    agency_affiliation: Optional[str] = None
+    experience_years: Optional[int] = None
+    specialties: Optional[str] = None
+    notes: Optional[str] = None
+
+class ChauffeurDriver(ChauffeurDriverBase):
+    id: int
+    tenant_id: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

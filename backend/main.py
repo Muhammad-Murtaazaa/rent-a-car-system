@@ -1909,6 +1909,52 @@ def delete_supplier_deal(deal_id: int, db: Session = Depends(get_db), tenant_con
         raise HTTPException(status_code=404, detail="Supplier deal not found")
     return {"message": "Supplier deal deleted successfully"}
 
+# --- Partner Agencies (Other Rent-A-Cars) Endpoints ---
+@app.get("/api/partner-agencies", response_model=List[schemas.PartnerAgency])
+def list_partner_agencies(db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    return crud.get_partner_agencies(db, tenant_id=tenant_context["tenant_id"])
+
+@app.post("/api/partner-agencies", response_model=schemas.PartnerAgency)
+def create_partner_agency(agency: schemas.PartnerAgencyCreate, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    return crud.create_partner_agency(db, agency=agency, tenant_id=tenant_context["tenant_id"])
+
+@app.put("/api/partner-agencies/{agency_id}", response_model=schemas.PartnerAgency)
+def update_partner_agency(agency_id: int, agency_update: schemas.PartnerAgencyUpdate, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    updated = crud.update_partner_agency(db, agency_id=agency_id, agency_update=agency_update, tenant_id=tenant_context["tenant_id"])
+    if not updated:
+        raise HTTPException(status_code=404, detail="Partner agency not found")
+    return updated
+
+@app.delete("/api/partner-agencies/{agency_id}")
+def delete_partner_agency(agency_id: int, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    deleted = crud.delete_partner_agency(db, agency_id=agency_id, tenant_id=tenant_context["tenant_id"])
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Partner agency not found")
+    return {"message": "Partner agency deleted successfully"}
+
+# --- Chauffeurs & Drivers Directory Endpoints ---
+@app.get("/api/drivers", response_model=List[schemas.ChauffeurDriver])
+def list_drivers(db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    return crud.get_drivers(db, tenant_id=tenant_context["tenant_id"])
+
+@app.post("/api/drivers", response_model=schemas.ChauffeurDriver)
+def create_driver(driver: schemas.ChauffeurDriverCreate, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    return crud.create_driver(db, driver=driver, tenant_id=tenant_context["tenant_id"])
+
+@app.put("/api/drivers/{driver_id}", response_model=schemas.ChauffeurDriver)
+def update_driver(driver_id: int, driver_update: schemas.ChauffeurDriverUpdate, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    updated = crud.update_driver(db, driver_id=driver_id, driver_update=driver_update, tenant_id=tenant_context["tenant_id"])
+    if not updated:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    return updated
+
+@app.delete("/api/drivers/{driver_id}")
+def delete_driver(driver_id: int, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    deleted = crud.delete_driver(db, driver_id=driver_id, tenant_id=tenant_context["tenant_id"])
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    return {"message": "Driver deleted successfully"}
+
 
 
 # --- Serve React Frontend SPA build ---

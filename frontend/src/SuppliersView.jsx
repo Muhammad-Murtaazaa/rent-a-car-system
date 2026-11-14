@@ -1,20 +1,62 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { 
   Building2, Plus, Search, Trash2, Edit2, X, Send, 
   DollarSign, TrendingUp, Car, Phone, Calendar, ArrowRightLeft,
-  CheckCircle, Clock, AlertCircle, FileSpreadsheet
+  CheckCircle, Clock, AlertCircle, FileSpreadsheet, User, Shield, 
+  Sparkles, Fuel, MapPin, Briefcase, Navigation, Check, ChevronRight
 } from "lucide-react";
 
 export default function SuppliersView({ supplierDeals = [], fetchData, branding = {} }) {
+  const [activeSubTab, setActiveSubTab] = useState("partners"); // "partners" | "drivers" | "deals"
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("All");
-  const [showModal, setShowModal] = useState(false);
+
+  // --- Partner Agencies State ---
+  const [partnerAgencies, setPartnerAgencies] = useState([]);
+  const [loadingPartners, setLoadingPartners] = useState(false);
+  const [showPartnerModal, setShowPartnerModal] = useState(false);
+  const [editingPartner, setEditingPartner] = useState(null);
+  const [partnerForm, setPartnerForm] = useState({
+    agency_name: "",
+    contact_person: "",
+    phone: "",
+    whatsapp: "",
+    city: "Lahore",
+    address: "",
+    commission_terms: "",
+    notes: "",
+    cars_list: [{ model: "", count: 1, daily_rate: "" }]
+  });
+
+  // --- Drivers State ---
+  const [drivers, setDrivers] = useState([]);
+  const [loadingDrivers, setLoadingDrivers] = useState(false);
+  const [showDriverModal, setShowDriverModal] = useState(false);
+  const [editingDriver, setEditingDriver] = useState(null);
+  const [driverForm, setDriverForm] = useState({
+    name: "",
+    phone: "",
+    cnic: "",
+    license_number: "",
+    license_expiry: "",
+    daily_wage: "",
+    status: "Available",
+    driver_type: "Freelance",
+    agency_affiliation: "",
+    experience_years: 3,
+    specialties: "City & Motorway",
+    notes: ""
+  });
+
+  // --- Sublet Deals State (Existing) ---
+  const [deals, setDeals] = useState(supplierDeals);
+  const [dealStatusFilter, setDealStatusFilter] = useState("All");
+  const [showDealModal, setShowDealModal] = useState(false);
   const [editingDeal, setEditingDeal] = useState(null);
 
   const today = new Date().toISOString().slice(0, 10);
   const nextWeek = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10);
 
-  const emptyForm = {
+  const emptyDealForm = {
     supplier_name: "",
     supplier_phone: "",
     supplier_cnic: "",
@@ -43,663 +85,1116 @@ export default function SuppliersView({ supplierDeals = [], fetchData, branding 
     status: "Active",
     notes: ""
   };
+  const [dealForm, setDealForm] = useState(emptyDealForm);
 
-  const [form, setForm] = useState(emptyForm);
-
-  const openAdd = () => {
-    setEditingDeal(null);
-    setForm(emptyForm);
-    setShowModal(true);
-  };
-
-  const openEdit = (deal) => {
-    setEditingDeal(deal);
-    setForm({
-      ...deal,
-      start_date: deal.start_date ? String(deal.start_date).slice(0, 10) : today,
-      end_date: deal.end_date ? String(deal.end_date).slice(0, 10) : today
-    });
-    setShowModal(true);
-  };
-
-  // Live recalculations
-  const updateDatesAndDays = (start, end, customDays = null) => {
-    let daysCount = customDays;
-    if (daysCount === null || daysCount === undefined) {
-      const d1 = new Date(start);
-      const d2 = new Date(end);
-      daysCount = Math.max(1, Math.ceil(Math.abs(d2 - d1) / (1000 * 60 * 60 * 24)));
+  // Load Partner Agencies & Drivers from Backend
+  const loadPartnerAgencies = async () => {
+    setLoadingPartners(true);
+    try {
+      const res = await fetch("/api/partner-agencies");
+      if (res.ok) {
+        const data = await res.json();
+        setPartnerAgencies(data);
+      }
+    } catch (e) {
+      console.error("Failed to load partner agencies", e);
+    } finally {
+      setLoadingPartners(false);
     }
-    const suppCost = Math.round(daysCount * (parseFloat(form.supplier_daily_rate) || 0));
-    const clientRent = Math.round(daysCount * (parseFloat(form.client_daily_rate) || 0));
-    const grossComm = clientRent - suppCost;
-    const totExp = (parseFloat(form.driver_expense) || 0) + (parseFloat(form.fuel_expense) || 0) + (parseFloat(form.other_expense) || 0);
-    const netProfit = grossComm - totExp;
-    const clientRec = parseFloat(form.client_received_amount) || 0;
-    const suppPaid = parseFloat(form.supplier_paid_amount) || 0;
+  };
 
-    setForm(prev => ({
+  const loadDrivers = async () => {
+    setLoadingDrivers(true);
+    try {
+      const res = await fetch("/api/drivers");
+      if (res.ok) {
+        const data = await res.json();
+        setDrivers(data);
+      }
+    } catch (e) {
+      console.error("Failed to load drivers", e);
+    } finally {
+      setLoadingDrivers(false);
+    }
+  };
+
+  const loadDeals = async () => {
+    try {
+      const res = await fetch("/api/supplier-deals");
+      if (res.ok) {
+        const data = await res.json();
+        setDeals(data);
+      }
+    } catch (e) {
+      console.error("Failed to load deals", e);
+    }
+  };
+
+  useEffect(() => {
+    loadPartnerAgencies();
+    loadDrivers();
+    loadDeals();
+  }, []);
+
+  // --- Partner Agency Handlers ---
+  const openAddPartner = () => {
+    setEditingPartner(null);
+    setPartnerForm({
+      agency_name: "",
+      contact_person: "",
+      phone: "",
+      whatsapp: "",
+      city: "Lahore",
+      address: "",
+      commission_terms: "15% or PKR 1,000/day",
+      notes: "",
+      cars_list: [{ model: "Toyota Fortuner", count: 2, daily_rate: 18000 }]
+    });
+    setShowPartnerModal(true);
+  };
+
+  const openEditPartner = (p) => {
+    setEditingPartner(p);
+    let parsedCars = [{ model: "", count: 1, daily_rate: "" }];
+    try {
+      parsedCars = JSON.parse(p.available_cars_json || "[]");
+      if (!parsedCars.length) parsedCars = [{ model: "", count: 1, daily_rate: "" }];
+    } catch {}
+    setPartnerForm({
+      agency_name: p.agency_name || "",
+      contact_person: p.contact_person || "",
+      phone: p.phone || "",
+      whatsapp: p.whatsapp || p.phone || "",
+      city: p.city || "Lahore",
+      address: p.address || "",
+      commission_terms: p.commission_terms || "",
+      notes: p.notes || "",
+      cars_list: parsedCars
+    });
+    setShowPartnerModal(true);
+  };
+
+  const addCarRowToPartner = () => {
+    setPartnerForm(prev => ({
       ...prev,
-      start_date: start,
-      end_date: end,
-      days: daysCount,
-      supplier_total_cost: suppCost,
-      client_total_rent: clientRent,
-      commission_amount: grossComm,
-      total_expenses: totExp,
-      net_cash_profit: netProfit,
-      client_remaining_balance: Math.max(0, clientRent - clientRec),
-      supplier_remaining_payable: Math.max(0, suppCost - suppPaid)
+      cars_list: [...prev.cars_list, { model: "", count: 1, daily_rate: "" }]
     }));
   };
 
-  const updateRatesAndExpenses = (field, val) => {
-    const next = { ...form, [field]: val };
-    const days = parseInt(next.days, 10) || 1;
-    const sRate = parseFloat(field === "supplier_daily_rate" ? val : next.supplier_daily_rate) || 0;
-    const cRate = parseFloat(field === "client_daily_rate" ? val : next.client_daily_rate) || 0;
-    const sCost = field === "supplier_total_cost" ? (parseFloat(val) || 0) : Math.round(days * sRate);
-    const cRent = field === "client_total_rent" ? (parseFloat(val) || 0) : Math.round(days * cRate);
-    
-    const dExp = parseFloat(field === "driver_expense" ? val : next.driver_expense) || 0;
-    const fExp = parseFloat(field === "fuel_expense" ? val : next.fuel_expense) || 0;
-    const oExp = parseFloat(field === "other_expense" ? val : next.other_expense) || 0;
-    const totExp = dExp + fExp + oExp;
-
-    const grossComm = cRent - sCost;
-    const netProfit = grossComm - totExp;
-
-    const cRec = parseFloat(field === "client_received_amount" ? val : next.client_received_amount) || 0;
-    const sPaid = parseFloat(field === "supplier_paid_amount" ? val : next.supplier_paid_amount) || 0;
-
-    setForm({
-      ...next,
-      supplier_daily_rate: sRate,
-      supplier_total_cost: sCost,
-      client_daily_rate: cRate,
-      client_total_rent: cRent,
-      commission_amount: grossComm,
-      driver_expense: dExp,
-      fuel_expense: fExp,
-      other_expense: oExp,
-      total_expenses: totExp,
-      net_cash_profit: netProfit,
-      client_remaining_balance: Math.max(0, cRent - cRec),
-      supplier_remaining_payable: Math.max(0, sCost - sPaid)
-    });
+  const removeCarRowFromPartner = (index) => {
+    setPartnerForm(prev => ({
+      ...prev,
+      cars_list: prev.cars_list.filter((_, i) => i !== index)
+    }));
   };
 
-  const handleSubmit = async (e) => {
+  const handlePartnerSubmit = async (e) => {
     e.preventDefault();
-    const method = editingDeal ? "PUT" : "POST";
-    const url = editingDeal ? `/api/supplier-deals/${editingDeal.id}` : "/api/supplier-deals";
+    const validCars = partnerForm.cars_list.filter(c => c.model.trim());
+    const totalCount = validCars.reduce((acc, curr) => acc + (parseInt(curr.count) || 1), 0);
 
     const payload = {
-      ...form,
-      days: parseInt(form.days, 10) || 1,
-      supplier_daily_rate: parseFloat(form.supplier_daily_rate) || 0,
-      supplier_total_cost: parseFloat(form.supplier_total_cost) || 0,
-      client_daily_rate: parseFloat(form.client_daily_rate) || 0,
-      client_total_rent: parseFloat(form.client_total_rent) || 0,
-      commission_amount: parseFloat(form.commission_amount) || 0,
-      driver_expense: parseFloat(form.driver_expense) || 0,
-      fuel_expense: parseFloat(form.fuel_expense) || 0,
-      other_expense: parseFloat(form.other_expense) || 0,
-      total_expenses: parseFloat(form.total_expenses) || 0,
-      net_cash_profit: parseFloat(form.net_cash_profit) || 0,
-      client_received_amount: parseFloat(form.client_received_amount) || 0,
-      client_remaining_balance: parseFloat(form.client_remaining_balance) || 0,
-      supplier_paid_amount: parseFloat(form.supplier_paid_amount) || 0,
-      supplier_remaining_payable: parseFloat(form.supplier_remaining_payable) || 0
+      agency_name: partnerForm.agency_name.trim(),
+      contact_person: partnerForm.contact_person.trim(),
+      phone: partnerForm.phone.trim(),
+      whatsapp: partnerForm.whatsapp.trim() || partnerForm.phone.trim(),
+      city: partnerForm.city.trim(),
+      address: partnerForm.address.trim(),
+      total_cars_count: totalCount,
+      available_cars_json: JSON.stringify(validCars),
+      commission_terms: partnerForm.commission_terms.trim(),
+      notes: partnerForm.notes.trim()
     };
 
-    const res = await fetch(url, {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-
-    if (res.ok) {
-      setShowModal(false);
-      setEditingDeal(null);
-      fetchData();
-    } else {
-      const err = await res.json();
-      alert(err.detail || "Error saving supplier deal.");
+    try {
+      const url = editingPartner ? `/api/partner-agencies/${editingPartner.id}` : "/api/partner-agencies";
+      const method = editingPartner ? "PUT" : "POST";
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        setShowPartnerModal(false);
+        loadPartnerAgencies();
+      }
+    } catch (e) {
+      alert("Failed to save partner agency.");
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm("Delete this supplier sublet deal record?")) return;
-    const res = await fetch(`/api/supplier-deals/${id}`, { method: "DELETE" });
-    if (res.ok) fetchData();
+  const handleDeletePartner = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this partner agency?")) return;
+    try {
+      const res = await fetch(`/api/partner-agencies/${id}`, { method: "DELETE" });
+      if (res.ok) loadPartnerAgencies();
+    } catch (e) {
+      alert("Failed to delete partner agency.");
+    }
   };
 
-  const sendSupplierWhatsApp = (deal) => {
-    const raw = deal.supplier_phone || "";
-    const clean = raw.replace(/[^0-9]/g, "");
-    if (!clean) return alert("Supplier has no valid phone number.");
-    const num = clean.startsWith("0") ? "92" + clean.substring(1) : clean;
-    const brand = branding?.name || "Rent A Car Management System";
-    const text = 
-      `*VEHICLE SUBLET DEAL CONFIRMATION* - ${brand}\n` +
-      `Supplier / Owner: ${deal.supplier_name}\n` +
-      `Vehicle: ${deal.car_make_model} (${deal.car_plate_number})\n` +
-      `Rental Period: ${deal.start_date} to ${deal.end_date} (${deal.days} days)\n` +
-      `Agreed Supplier Rate: PKR ${Number(deal.supplier_daily_rate).toLocaleString()}/day\n` +
-      `Total Cost Payable: PKR ${Number(deal.supplier_total_cost).toLocaleString()}\n` +
-      `Amount Paid: PKR ${Number(deal.supplier_paid_amount).toLocaleString()}\n` +
-      `*Remaining Balance to Supplier: PKR ${Number(deal.supplier_remaining_payable).toLocaleString()}*`;
-    window.open(`https://wa.me/${num}?text=${encodeURIComponent(text)}`, "_blank");
+  // --- Driver Handlers ---
+  const openAddDriver = () => {
+    setEditingDriver(null);
+    setDriverForm({
+      name: "",
+      phone: "",
+      cnic: "",
+      license_number: "",
+      license_expiry: "",
+      daily_wage: 2000,
+      status: "Available",
+      driver_type: "Freelance",
+      agency_affiliation: "",
+      experience_years: 5,
+      specialties: "City & Motorway",
+      notes: ""
+    });
+    setShowDriverModal(true);
   };
 
-  const sendClientWhatsApp = (deal) => {
-    const raw = deal.customer_phone || "";
-    const clean = raw.replace(/[^0-9]/g, "");
-    if (!clean) return alert("Client has no valid phone number.");
-    const num = clean.startsWith("0") ? "92" + clean.substring(1) : clean;
-    const brand = branding?.name || "Rent A Car Management System";
-    const text = 
-      `*VEHICLE RENTAL BOOKING* - ${brand}\n` +
-      `Dear ${deal.customer_name},\n` +
-      `Vehicle: ${deal.car_make_model} (${deal.car_plate_number})\n` +
-      `Duration: ${deal.start_date} to ${deal.end_date} (${deal.days} days)\n` +
-      `Total Rent: PKR ${Number(deal.client_total_rent).toLocaleString()}\n` +
-      `Advance Paid: PKR ${Number(deal.client_received_amount).toLocaleString()}\n` +
-      `*Remaining Balance Due: PKR ${Number(deal.client_remaining_balance).toLocaleString()}*`;
-    window.open(`https://wa.me/${num}?text=${encodeURIComponent(text)}`, "_blank");
+  const openEditDriver = (d) => {
+    setEditingDriver(d);
+    setDriverForm({
+      name: d.name || "",
+      phone: d.phone || "",
+      cnic: d.cnic || "",
+      license_number: d.license_number || "",
+      license_expiry: d.license_expiry || "",
+      daily_wage: d.daily_wage || 0,
+      status: d.status || "Available",
+      driver_type: d.driver_type || "Freelance",
+      agency_affiliation: d.agency_affiliation || "",
+      experience_years: d.experience_years || 0,
+      specialties: d.specialties || "",
+      notes: d.notes || ""
+    });
+    setShowDriverModal(true);
   };
 
-  // Filtered list
-  const filtered = supplierDeals.filter(d => {
-    const s = search.toLowerCase();
-    const matchSearch = 
-      (d.supplier_name || "").toLowerCase().includes(s) ||
-      (d.car_make_model || "").toLowerCase().includes(s) ||
-      (d.car_plate_number || "").toLowerCase().includes(s) ||
-      (d.customer_name || "").toLowerCase().includes(s);
-    const matchStatus = statusFilter === "All" || d.status === statusFilter;
-    return matchSearch && matchStatus;
+  const handleDriverSubmit = async (e) => {
+    e.preventDefault();
+    const payload = {
+      name: driverForm.name.trim(),
+      phone: driverForm.phone.trim(),
+      cnic: driverForm.cnic.trim(),
+      license_number: driverForm.license_number.trim(),
+      license_expiry: driverForm.license_expiry.trim(),
+      daily_wage: parseFloat(driverForm.daily_wage) || 0.0,
+      status: driverForm.status,
+      driver_type: driverForm.driver_type,
+      agency_affiliation: driverForm.agency_affiliation.trim(),
+      experience_years: parseInt(driverForm.experience_years) || 0,
+      specialties: driverForm.specialties.trim(),
+      notes: driverForm.notes.trim()
+    };
+
+    try {
+      const url = editingDriver ? `/api/drivers/${editingDriver.id}` : "/api/drivers";
+      const method = editingDriver ? "PUT" : "POST";
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        setShowDriverModal(false);
+        loadDrivers();
+      }
+    } catch (e) {
+      alert("Failed to save driver.");
+    }
+  };
+
+  const handleDeleteDriver = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this driver?")) return;
+    try {
+      const res = await fetch(`/api/drivers/${id}`, { method: "DELETE" });
+      if (res.ok) loadDrivers();
+    } catch (e) {
+      alert("Failed to delete driver.");
+    }
+  };
+
+  // --- Calculations for Partner Fleet ---
+  const totalPartnerAgencies = partnerAgencies.length;
+  const totalNetworkCars = partnerAgencies.reduce((acc, curr) => acc + (curr.total_cars_count || 0), 0);
+  const totalDrivers = drivers.length;
+  const availableDrivers = drivers.filter(d => d.status === "Available").length;
+
+  // Search filtering
+  const filteredPartners = partnerAgencies.filter(p => {
+    const q = search.toLowerCase();
+    const matchesAgency = p.agency_name.toLowerCase().includes(q) ||
+      (p.contact_person && p.contact_person.toLowerCase().includes(q)) ||
+      (p.city && p.city.toLowerCase().includes(q)) ||
+      p.phone.includes(q);
+    const matchesCars = (p.available_cars_json || "").toLowerCase().includes(q);
+    return matchesAgency || matchesCars;
   });
 
-  // KPI calculations
-  const totalDeals = supplierDeals.length;
-  const totalClientRevenue = supplierDeals.reduce((s, d) => s + (d.client_total_rent || 0), 0);
-  const totalSupplierCost = supplierDeals.reduce((s, d) => s + (d.supplier_total_cost || 0), 0);
-  const totalExpensesCut = supplierDeals.reduce((s, d) => s + (d.total_expenses || 0), 0);
-  const totalGrossCommission = supplierDeals.reduce((s, d) => s + (d.commission_amount || 0), 0);
-  const totalNetCashProfit = supplierDeals.reduce((s, d) => s + (d.net_cash_profit || 0), 0);
-  const totalClientReceivable = supplierDeals.reduce((s, d) => s + (d.client_remaining_balance || 0), 0);
-  const totalSupplierPayable = supplierDeals.reduce((s, d) => s + (d.supplier_remaining_payable || 0), 0);
+  const filteredDrivers = drivers.filter(d => {
+    const q = search.toLowerCase();
+    return d.name.toLowerCase().includes(q) ||
+      d.phone.includes(q) ||
+      (d.specialties && d.specialties.toLowerCase().includes(q)) ||
+      (d.agency_affiliation && d.agency_affiliation.toLowerCase().includes(q));
+  });
 
   return (
-    <div className="space-y-6">
-      {/* Page Toolbar */}
-      <div className="page-toolbar">
-        <div className="min-w-0">
-          <h2 className="text-2xl md:text-3xl font-semibold tracking-tight text-[var(--text-main)]">
-            Supplier & Sublet Deals
+    <div className="space-y-6 text-left">
+      
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight text-[var(--text-main)] flex items-center gap-2.5">
+            <Building2 className="h-6 w-6 text-teal-400" />
+            Partner Rent A Cars & Drivers Network
           </h2>
-          <p className="text-sm text-[var(--text-muted)] mt-1">
-            Source cars from external suppliers/owners, rent to clients, and track commission & cash profit after cutting all expenses.
+          <p className="text-xs text-[var(--text-muted)] mt-1">
+            Directory of external rental agencies, their available cars count & fleet, and chauffeur contact profiles.
           </p>
         </div>
-        <button
-          onClick={openAdd}
-          className="btn-accent text-white font-semibold py-2.5 px-4 rounded-xl text-xs flex items-center gap-2 min-h-[44px]"
-        >
-          <Plus className="h-4 w-4" /> New Sublet Car Deal
-        </button>
+
+        {/* Action Button */}
+        {activeSubTab === "partners" && (
+          <button
+            onClick={openAddPartner}
+            className="py-2.5 px-4 rounded-xl bg-teal-500 hover:bg-teal-400 text-white font-bold text-xs shadow-lg shadow-teal-500/20 flex items-center gap-2 transition-all transform active:scale-95"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Add Partner Rent-A-Car</span>
+          </button>
+        )}
+        {activeSubTab === "drivers" && (
+          <button
+            onClick={openAddDriver}
+            className="py-2.5 px-4 rounded-xl bg-teal-500 hover:bg-teal-400 text-white font-bold text-xs shadow-lg shadow-teal-500/20 flex items-center gap-2 transition-all transform active:scale-95"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Add Chauffeur / Driver</span>
+          </button>
+        )}
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* KPI Overview Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="glass-panel p-4 rounded-2xl border border-[var(--border-color)]">
-          <span className="text-[10px] uppercase font-bold text-[var(--text-muted)] tracking-wider block">Total Sourced Deals</span>
-          <div className="text-2xl font-extrabold text-[var(--text-main)] mt-1">{totalDeals}</div>
-          <div className="text-[11px] text-[var(--text-muted)] mt-1">
-            Sold: <span className="font-semibold text-teal-500">PKR {totalClientRevenue.toLocaleString()}</span>
+          <div className="flex items-center justify-between text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
+            <span>Partner Agencies</span>
+            <Building2 className="h-4 w-4 text-teal-400" />
           </div>
+          <div className="text-2xl font-mono font-bold text-[var(--text-main)] mt-2">
+            {totalPartnerAgencies}
+          </div>
+          <div className="text-[11px] text-[var(--text-muted)] mt-0.5">Verified external rental hubs</div>
         </div>
 
         <div className="glass-panel p-4 rounded-2xl border border-[var(--border-color)]">
-          <span className="text-[10px] uppercase font-bold text-[var(--text-muted)] tracking-wider block">Supplier Payout Cost</span>
-          <div className="text-2xl font-extrabold text-amber-500 mt-1">PKR {totalSupplierCost.toLocaleString()}</div>
-          <div className="text-[11px] text-[var(--text-muted)] mt-1">
-            Payable: <span className="font-semibold text-rose-500">PKR {totalSupplierPayable.toLocaleString()}</span>
+          <div className="flex items-center justify-between text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
+            <span>External Fleet Available</span>
+            <Car className="h-4 w-4 text-emerald-400" />
           </div>
+          <div className="text-2xl font-mono font-bold text-emerald-400 mt-2">
+            {totalNetworkCars} Vehicles
+          </div>
+          <div className="text-[11px] text-[var(--text-muted)] mt-0.5">Across partner fleets</div>
         </div>
 
         <div className="glass-panel p-4 rounded-2xl border border-[var(--border-color)]">
-          <span className="text-[10px] uppercase font-bold text-[var(--text-muted)] tracking-wider block">Total Expenses Cut</span>
-          <div className="text-2xl font-extrabold text-orange-500 mt-1">PKR {totalExpensesCut.toLocaleString()}</div>
-          <div className="text-[11px] text-[var(--text-muted)] mt-1">
-            Gross Comm: <span className="font-semibold text-teal-400">PKR {totalGrossCommission.toLocaleString()}</span>
+          <div className="flex items-center justify-between text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
+            <span>Registered Drivers</span>
+            <User className="h-4 w-4 text-blue-400" />
           </div>
+          <div className="text-2xl font-mono font-bold text-blue-400 mt-2">
+            {totalDrivers}
+          </div>
+          <div className="text-[11px] text-[var(--text-muted)] mt-0.5">In-house & freelance</div>
         </div>
 
-        <div className="glass-panel p-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/5">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] uppercase font-bold text-emerald-600 dark:text-emerald-400 tracking-wider block">Net Cash Profit</span>
-            <TrendingUp className="h-4 w-4 text-emerald-500" />
+        <div className="glass-panel p-4 rounded-2xl border border-[var(--border-color)]">
+          <div className="flex items-center justify-between text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
+            <span>Available Drivers</span>
+            <CheckCircle className="h-4 w-4 text-teal-400" />
           </div>
-          <div className="text-2xl font-extrabold text-emerald-600 dark:text-emerald-400 mt-1">
-            PKR {totalNetCashProfit.toLocaleString()}
+          <div className="text-2xl font-mono font-bold text-teal-300 mt-2">
+            {availableDrivers} Free
           </div>
-          <div className="text-[11px] text-[var(--text-muted)] mt-1">
-            Pending Client: <span className="font-semibold text-amber-500">PKR {totalClientReceivable.toLocaleString()}</span>
-          </div>
+          <div className="text-[11px] text-[var(--text-muted)] mt-0.5">Ready for dispatch</div>
         </div>
       </div>
 
-      {/* Filter and Search Bar */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-3.5 h-4 w-4 text-[var(--text-muted)]" />
+      {/* Sub-Tabs Selector & Search */}
+      <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
+        {/* Tab pills */}
+        <div className="flex items-center gap-1.5 p-1 rounded-xl bg-[var(--bg-card)] border border-[var(--border-color)]">
+          <button
+            type="button"
+            onClick={() => setActiveSubTab("partners")}
+            className={`py-2 px-3.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+              activeSubTab === "partners"
+                ? "bg-teal-500 text-white shadow-sm"
+                : "text-[var(--text-muted)] hover:text-[var(--text-main)]"
+            }`}
+          >
+            <Building2 className="h-3.5 w-3.5" />
+            <span>Other Rent A Cars ({totalPartnerAgencies})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveSubTab("drivers")}
+            className={`py-2 px-3.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+              activeSubTab === "drivers"
+                ? "bg-teal-500 text-white shadow-sm"
+                : "text-[var(--text-muted)] hover:text-[var(--text-main)]"
+            }`}
+          >
+            <User className="h-3.5 w-3.5" />
+            <span>Chauffeurs & Drivers ({totalDrivers})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveSubTab("deals")}
+            className={`py-2 px-3.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+              activeSubTab === "deals"
+                ? "bg-teal-500 text-white shadow-sm"
+                : "text-[var(--text-muted)] hover:text-[var(--text-main)]"
+            }`}
+          >
+            <ArrowRightLeft className="h-3.5 w-3.5" />
+            <span>Sublet Deals ({deals.length})</span>
+          </button>
+        </div>
+
+        {/* Search Bar */}
+        <div className="relative min-w-[240px]">
+          <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
           <input
             type="text"
-            placeholder="Search by Supplier, Car Plate, Make/Model, or Client Name..."
+            placeholder={
+              activeSubTab === "partners"
+                ? "Search agency or car (e.g. Prado, Civic)..."
+                : "Search driver name, phone, routes..."
+            }
             value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-full app-input rounded-xl py-3 pl-10 pr-4 text-sm focus:outline-none"
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 rounded-xl app-input text-xs focus:outline-none"
           />
         </div>
-        <select
-          value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value)}
-          className="app-input rounded-xl px-4 py-3 text-sm focus:outline-none"
-        >
-          <option value="All">All Deal Statuses</option>
-          <option value="Active">Active</option>
-          <option value="Completed">Completed</option>
-          <option value="Pending Payment">Pending Payment</option>
-          <option value="Cancelled">Cancelled</option>
-        </select>
       </div>
 
-      {/* Deals Table (Desktop) */}
-      <div className="hidden lg:block glass-panel rounded-2xl border border-[var(--border-color)] overflow-hidden">
-        <table className="w-full text-left border-collapse text-xs">
-          <thead>
-            <tr className="bg-[var(--tr-hover)] text-[var(--text-muted)] border-b border-[var(--border-color)] uppercase font-semibold">
-              <th className="p-4">Supplier / Owner</th>
-              <th className="p-4">Sourced Car</th>
-              <th className="p-4">Rented To (Client)</th>
-              <th className="p-4">Cost vs Sold</th>
-              <th className="p-4">Commission & Profit</th>
-              <th className="p-4">Payment Ledger</th>
-              <th className="p-4">Status</th>
-              <th className="p-4 text-center">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-[var(--border-color)]">
-            {filtered.length === 0 ? (
-              <tr>
-                <td colSpan={8} className="p-10 text-center text-[var(--text-muted)] italic">
-                  No sublet supplier deals logged yet. Click "New Sublet Car Deal" to record an outsourced rental.
-                </td>
-              </tr>
-            ) : filtered.map(d => (
-              <tr key={d.id} className="hover:bg-[var(--tr-hover)]/30 transition-colors">
-                <td className="p-4">
-                  <div className="font-bold text-sm text-[var(--text-main)]">{d.supplier_name}</div>
-                  <div className="text-[11px] text-[var(--text-muted)] font-mono">{d.supplier_phone}</div>
-                  {d.supplier_cnic && <div className="text-[10px] text-[var(--text-muted)] font-mono">{d.supplier_cnic}</div>}
-                </td>
-                <td className="p-4">
-                  <div className="font-bold text-[var(--text-main)]">{d.car_make_model}</div>
-                  <div className="text-teal-700 dark:text-teal-400 font-mono font-bold">{d.car_plate_number}</div>
-                  {d.car_color && <div className="text-[10px] text-[var(--text-muted)]">{d.car_color}</div>}
-                </td>
-                <td className="p-4">
-                  <div className="font-bold text-[var(--text-main)]">{d.customer_name}</div>
-                  <div className="text-[11px] text-[var(--text-muted)]">{d.customer_phone}</div>
-                  <div className="text-[10px] text-[var(--text-muted)] font-mono mt-0.5">
-                    {String(d.start_date).slice(0, 10)} → {String(d.end_date).slice(0, 10)} ({d.days}d)
-                  </div>
-                </td>
-                <td className="p-4">
-                  <div className="text-[11px]">
-                    <span className="text-[var(--text-muted)]">Taken:</span>{" "}
-                    <span className="font-semibold text-amber-500 font-mono">PKR {Number(d.supplier_total_cost).toLocaleString()}</span>
-                  </div>
-                  <div className="text-[11px]">
-                    <span className="text-[var(--text-muted)]">Sold:</span>{" "}
-                    <span className="font-semibold text-teal-500 font-mono">PKR {Number(d.client_total_rent).toLocaleString()}</span>
-                  </div>
-                </td>
-                <td className="p-4">
-                  <div className="text-[11px] text-teal-400 font-bold">
-                    Gross Comm: PKR {Number(d.commission_amount).toLocaleString()}
-                  </div>
-                  {d.total_expenses > 0 && (
-                    <div className="text-[10px] text-orange-400">
-                      - Exp: PKR {Number(d.total_expenses).toLocaleString()}
+      {/* ======================================================== */}
+      {/* TAB 1: PARTNER RENT A CARS (AGENCIES & THEIR FLEET) */}
+      {/* ======================================================== */}
+      {activeSubTab === "partners" && (
+        <div className="space-y-4">
+          {filteredPartners.length === 0 ? (
+            <div className="glass-panel p-10 rounded-2xl border border-[var(--border-color)] text-center space-y-3">
+              <Building2 className="h-10 w-10 text-[var(--text-muted)] mx-auto opacity-50" />
+              <div className="font-bold text-sm text-[var(--text-main)]">No Partner Agencies Found</div>
+              <p className="text-xs text-[var(--text-muted)] max-w-sm mx-auto">
+                Add other rent a car agencies to keep track of their fleet size, car models, sublet rates, and contact numbers.
+              </p>
+              <button
+                onClick={openAddPartner}
+                className="btn-accent py-2 px-4 rounded-xl text-xs font-bold text-white inline-flex items-center gap-1.5"
+              >
+                <Plus className="h-4 w-4" /> Add First Partner Rent-A-Car
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredPartners.map(p => {
+                let carsList = [];
+                try {
+                  carsList = JSON.parse(p.available_cars_json || "[]");
+                } catch {}
+
+                const cleanPhone = (p.whatsapp || p.phone || "").replace(/[^0-9]/g, "");
+                const waPhone = cleanPhone.startsWith("0") ? "92" + cleanPhone.substring(1) : cleanPhone;
+
+                return (
+                  <div 
+                    key={p.id}
+                    className="glass-panel p-5 rounded-2xl border border-[var(--border-color)] hover:border-teal-500/40 transition-all flex flex-col justify-between space-y-4 shadow-sm group"
+                  >
+                    <div>
+                      {/* Agency Header */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <h3 className="font-bold text-base text-[var(--text-main)] truncate capitalize group-hover:text-teal-400 transition-colors">
+                            {p.agency_name}
+                          </h3>
+                          <div className="flex items-center gap-1.5 mt-0.5 text-xs text-[var(--text-muted)]">
+                            <MapPin className="h-3 w-3 text-teal-400 shrink-0" />
+                            <span className="truncate">{p.city} {p.address ? `· ${p.address}` : ""}</span>
+                          </div>
+                        </div>
+                        <span className="px-2.5 py-1 rounded-full bg-teal-500/15 border border-teal-500/30 text-teal-400 font-mono font-bold text-xs shrink-0">
+                          {p.total_cars_count || carsList.length} Cars
+                        </span>
+                      </div>
+
+                      {/* Contact Info */}
+                      <div className="mt-3 p-2.5 rounded-xl bg-[var(--bg-app)] border border-[var(--border-color)] flex items-center justify-between text-xs">
+                        <div className="min-w-0">
+                          <div className="text-[10px] uppercase font-bold text-[var(--text-muted)]">Contact Person</div>
+                          <div className="font-semibold text-[var(--text-main)] truncate">{p.contact_person || "Manager"}</div>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <a
+                            href={`tel:${p.phone}`}
+                            className="p-1.5 rounded-lg border border-[var(--border-color)] hover:bg-teal-500/10 hover:text-teal-400 transition-colors"
+                            title="Call Phone"
+                          >
+                            <Phone className="h-3.5 w-3.5" />
+                          </a>
+                          <a
+                            href={`https://wa.me/${waPhone}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="p-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+                            title="Chat on WhatsApp"
+                          >
+                            <Send className="h-3.5 w-3.5" />
+                          </a>
+                        </div>
+                      </div>
+
+                      {/* Available Fleet Models & Rates */}
+                      <div className="mt-3.5 space-y-1.5">
+                        <div className="text-[10px] uppercase font-bold text-[var(--text-muted)] tracking-wider flex items-center justify-between">
+                          <span>Fleet Breakdown ({carsList.length} Models)</span>
+                          {p.commission_terms && (
+                            <span className="text-teal-400 normal-case">{p.commission_terms}</span>
+                          )}
+                        </div>
+
+                        {carsList.length === 0 ? (
+                          <div className="text-[11px] text-[var(--text-muted)] italic">No specific car breakdown entered.</div>
+                        ) : (
+                          <div className="flex flex-wrap gap-1.5">
+                            {carsList.map((c, idx) => (
+                              <div 
+                                key={idx}
+                                className="px-2 py-1 rounded-lg bg-[var(--tr-hover)] border border-[var(--border-color)] text-[11px] flex items-center gap-1.5"
+                              >
+                                <Car className="h-3 w-3 text-teal-400" />
+                                <span className="font-semibold text-[var(--text-main)]">{c.model}</span>
+                                <span className="font-bold text-teal-400 font-mono">({c.count}x)</span>
+                                {c.daily_rate && (
+                                  <span className="text-[10px] text-[var(--text-muted)] font-mono">· PKR {parseInt(c.daily_rate).toLocaleString()}</span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {p.notes && (
+                        <p className="mt-2 text-[11px] text-[var(--text-muted)] italic line-clamp-2">
+                          "{p.notes}"
+                        </p>
+                      )}
                     </div>
-                  )}
-                  <div className="mt-1">
-                    <span className="px-2 py-0.5 rounded text-[11px] font-extrabold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                      Net: PKR {Number(d.net_cash_profit).toLocaleString()}
-                    </span>
+
+                    {/* Bottom Actions */}
+                    <div className="pt-3 border-t border-[var(--border-color)] flex items-center justify-between">
+                      <span className="text-[10px] text-[var(--text-muted)] font-mono">
+                        ID #{p.id}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => openEditPartner(p)}
+                          className="p-1.5 rounded-lg border border-[var(--border-color)] text-[var(--text-muted)] hover:text-teal-400 hover:bg-teal-500/10 transition-colors"
+                          title="Edit Partner Agency"
+                        >
+                          <Edit2 className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDeletePartner(p.id)}
+                          className="p-1.5 rounded-lg border border-rose-500/20 text-rose-500 hover:bg-rose-500/10 transition-colors"
+                          title="Delete Partner Agency"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                </td>
-                <td className="p-4">
-                  <div className="text-[10px]">
-                    <span className="text-[var(--text-muted)]">Client Bal:</span>{" "}
-                    <span className={d.client_remaining_balance > 0 ? "font-bold text-rose-500" : "font-bold text-emerald-500"}>
-                      {d.client_remaining_balance > 0 ? `PKR ${Number(d.client_remaining_balance).toLocaleString()}` : "✓ Paid"}
-                    </span>
-                  </div>
-                  <div className="text-[10px] mt-0.5">
-                    <span className="text-[var(--text-muted)]">Supplier Bal:</span>{" "}
-                    <span className={d.supplier_remaining_payable > 0 ? "font-bold text-amber-500" : "font-bold text-emerald-500"}>
-                      {d.supplier_remaining_payable > 0 ? `PKR ${Number(d.supplier_remaining_payable).toLocaleString()}` : "✓ Paid"}
-                    </span>
-                  </div>
-                </td>
-                <td className="p-4">
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                    d.status === "Completed" ? "bg-emerald-500/10 text-emerald-500" :
-                    d.status === "Active" ? "bg-teal-500/10 text-teal-500" :
-                    d.status === "Pending Payment" ? "bg-amber-500/10 text-amber-500" :
-                    "bg-rose-500/10 text-rose-500"
-                  }`}>
-                    {d.status}
-                  </span>
-                </td>
-                <td className="p-4 text-center">
-                  <div className="flex items-center justify-center gap-1.5">
-                    <button
-                      onClick={() => sendSupplierWhatsApp(d)}
-                      className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 hover:bg-emerald-500/20"
-                      title="WhatsApp to Supplier"
-                    >
-                      <Send className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      onClick={() => sendClientWhatsApp(d)}
-                      className="p-1.5 rounded-lg bg-teal-500/10 text-teal-500 border border-teal-500/20 hover:bg-teal-500/20"
-                      title="WhatsApp to Client"
-                    >
-                      <Phone className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      onClick={() => openEdit(d)}
-                      className="p-1.5 rounded-lg border border-[var(--border-color)] hover:border-teal-500 text-[var(--text-muted)]"
-                      title="Edit Deal"
-                    >
-                      <Edit2 className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(d.id)}
-                      className="p-1.5 rounded-lg border border-rose-500/20 text-rose-500 hover:bg-rose-500/10"
-                      title="Delete Deal"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Mobile Cards */}
-      <div className="grid grid-cols-1 gap-4 lg:hidden">
-        {filtered.map(d => (
-          <div key={d.id} className="glass-panel p-4 rounded-2xl border border-[var(--border-color)] space-y-3">
-            <div className="flex justify-between items-start">
-              <div>
-                <h4 className="font-bold text-sm text-[var(--text-main)]">{d.car_make_model}</h4>
-                <p className="text-[11px] font-mono font-bold text-teal-600 dark:text-teal-400">{d.car_plate_number}</p>
-              </div>
-              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                d.status === "Completed" ? "bg-emerald-500/10 text-emerald-500" :
-                d.status === "Active" ? "bg-teal-500/10 text-teal-500" : "bg-amber-500/10 text-amber-500"
-              }`}>
-                {d.status}
-              </span>
+                );
+              })}
             </div>
+          )}
+        </div>
+      )}
 
-            <div className="text-xs space-y-1 text-[var(--text-muted)] border-t border-b border-[var(--border-color)] py-2">
-              <p><span className="font-semibold text-[var(--text-main)]">Supplier:</span> {d.supplier_name} ({d.supplier_phone})</p>
-              <p><span className="font-semibold text-[var(--text-main)]">Rented To:</span> {d.customer_name} ({d.customer_phone})</p>
-              <p><span className="font-semibold text-[var(--text-main)]">Duration:</span> {d.days} days ({String(d.start_date).slice(0, 10)} → {String(d.end_date).slice(0, 10)})</p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className="p-2 rounded-xl bg-[var(--bg-app)] border border-[var(--border-color)]">
-                <span className="text-[10px] text-[var(--text-muted)] block">Supplier Cost</span>
-                <span className="font-bold text-amber-500 font-mono">PKR {Number(d.supplier_total_cost).toLocaleString()}</span>
-              </div>
-              <div className="p-2 rounded-xl bg-[var(--bg-app)] border border-[var(--border-color)]">
-                <span className="text-[10px] text-[var(--text-muted)] block">Client Price</span>
-                <span className="font-bold text-teal-500 font-mono">PKR {Number(d.client_total_rent).toLocaleString()}</span>
-              </div>
-            </div>
-
-            <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex justify-between items-center text-xs">
-              <div>
-                <span className="text-[10px] uppercase font-bold text-emerald-600 dark:text-emerald-400 block">Net Cash Profit</span>
-                <span className="text-sm font-extrabold text-emerald-600 dark:text-emerald-400">PKR {Number(d.net_cash_profit).toLocaleString()}</span>
-              </div>
-              <div className="text-right text-[10px] text-[var(--text-muted)]">
-                <div>Comm: PKR {Number(d.commission_amount).toLocaleString()}</div>
-                <div>Exp: PKR {Number(d.total_expenses).toLocaleString()}</div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-[var(--border-color)]">
-              <button onClick={() => sendSupplierWhatsApp(d)} className="px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 text-xs font-semibold flex items-center gap-1">
-                <Send className="h-3.5 w-3.5" /> Supplier WA
-              </button>
-              <button onClick={() => sendClientWhatsApp(d)} className="px-3 py-1.5 rounded-lg bg-teal-500/10 text-teal-500 border border-teal-500/20 text-xs font-semibold flex items-center gap-1">
-                <Phone className="h-3.5 w-3.5" /> Client WA
-              </button>
-              <button onClick={() => openEdit(d)} className="p-1.5 rounded-lg border border-[var(--border-color)] text-[var(--text-muted)]">
-                <Edit2 className="h-3.5 w-3.5" />
-              </button>
-              <button onClick={() => handleDelete(d.id)} className="p-1.5 rounded-lg border border-rose-500/20 text-rose-500">
-                <Trash2 className="h-3.5 w-3.5" />
+      {/* ======================================================== */}
+      {/* TAB 2: CHAUFFEURS & DRIVERS DIRECTORY */}
+      {/* ======================================================== */}
+      {activeSubTab === "drivers" && (
+        <div className="space-y-4">
+          {filteredDrivers.length === 0 ? (
+            <div className="glass-panel p-10 rounded-2xl border border-[var(--border-color)] text-center space-y-3">
+              <User className="h-10 w-10 text-[var(--text-muted)] mx-auto opacity-50" />
+              <div className="font-bold text-sm text-[var(--text-main)]">No Drivers Found</div>
+              <p className="text-xs text-[var(--text-muted)] max-w-sm mx-auto">
+                Maintain a master list of all in-house, freelance, and partner agency chauffeurs.
+              </p>
+              <button
+                onClick={openAddDriver}
+                className="btn-accent py-2 px-4 rounded-xl text-xs font-bold text-white inline-flex items-center gap-1.5"
+              >
+                <Plus className="h-4 w-4" /> Add First Chauffeur / Driver
               </button>
             </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredDrivers.map(d => {
+                const cleanPhone = (d.phone || "").replace(/[^0-9]/g, "");
+                const waPhone = cleanPhone.startsWith("0") ? "92" + cleanPhone.substring(1) : cleanPhone;
+
+                const statusColor = d.status === "Available" 
+                  ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                  : d.status === "On Duty" 
+                  ? "bg-blue-500/15 text-blue-400 border-blue-500/30"
+                  : "bg-amber-500/15 text-amber-400 border-amber-500/30";
+
+                return (
+                  <div
+                    key={d.id}
+                    className="glass-panel p-5 rounded-2xl border border-[var(--border-color)] hover:border-teal-500/40 transition-all flex flex-col justify-between space-y-4 shadow-sm"
+                  >
+                    <div>
+                      {/* Driver Card Header */}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-10 h-10 rounded-2xl bg-teal-500/15 border border-teal-500/30 text-teal-400 font-bold flex items-center justify-center text-sm shrink-0">
+                            {d.name.charAt(0).toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <h3 className="font-bold text-base text-[var(--text-main)] truncate capitalize">
+                              {d.name}
+                            </h3>
+                            <div className="text-xs text-[var(--text-muted)] flex items-center gap-1.5">
+                              <span>{d.driver_type}</span>
+                              {d.agency_affiliation && (
+                                <span>· {d.agency_affiliation}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <span className={`px-2 py-0.5 rounded-full border text-[11px] font-bold ${statusColor} shrink-0`}>
+                          {d.status}
+                        </span>
+                      </div>
+
+                      {/* Contact & Rate Strip */}
+                      <div className="mt-3.5 p-3 rounded-xl bg-[var(--bg-app)] border border-[var(--border-color)] space-y-2 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[var(--text-muted)]">Daily Wage:</span>
+                          <span className="font-mono font-bold text-teal-400">PKR {d.daily_wage?.toLocaleString()}/day</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[var(--text-muted)]">Phone / WhatsApp:</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-semibold">{d.phone}</span>
+                            <a
+                              href={`https://wa.me/${waPhone}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-emerald-400 hover:text-emerald-300"
+                              title="Chat on WhatsApp"
+                            >
+                              <Send className="h-3 w-3" />
+                            </a>
+                          </div>
+                        </div>
+                        {d.cnic && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-[var(--text-muted)]">CNIC Number:</span>
+                            <span className="font-mono">{d.cnic}</span>
+                          </div>
+                        )}
+                        {d.license_number && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-[var(--text-muted)]">License No:</span>
+                            <span className="font-mono">{d.license_number}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Specialties & Experience */}
+                      <div className="mt-3 space-y-1">
+                        <div className="flex items-center justify-between text-[10px] text-[var(--text-muted)] uppercase font-bold tracking-wider">
+                          <span>Specialties</span>
+                          <span>{d.experience_years ? `${d.experience_years} yrs exp` : ""}</span>
+                        </div>
+                        <div className="text-xs font-semibold text-[var(--text-main)]">
+                          {d.specialties || "General Chauffeur"}
+                        </div>
+                      </div>
+
+                      {d.notes && (
+                        <p className="mt-2 text-[11px] text-[var(--text-muted)] italic line-clamp-2">
+                          "{d.notes}"
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Footer Actions */}
+                    <div className="pt-3 border-t border-[var(--border-color)] flex items-center justify-between">
+                      <span className="text-[10px] text-[var(--text-muted)] font-mono">
+                        Driver #{d.id}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => openEditDriver(d)}
+                          className="p-1.5 rounded-lg border border-[var(--border-color)] text-[var(--text-muted)] hover:text-teal-400 hover:bg-teal-500/10 transition-colors"
+                          title="Edit Driver"
+                        >
+                          <Edit2 className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteDriver(d.id)}
+                          className="p-1.5 rounded-lg border border-rose-500/20 text-rose-500 hover:bg-rose-500/10 transition-colors"
+                          title="Delete Driver"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* TAB 3: SUBLET DEALS (EXISTING) */}
+      {/* ======================================================== */}
+      {activeSubTab === "deals" && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="text-xs text-[var(--text-muted)]">
+              Active sublet car assignments borrowed from third-party rental companies.
+            </div>
+            <button
+              onClick={() => {
+                setEditingDeal(null);
+                setDealForm(emptyDealForm);
+                setShowDealModal(true);
+              }}
+              className="py-2 px-3.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-white font-bold text-xs flex items-center gap-1.5"
+            >
+              <Plus className="h-3.5 w-3.5" /> New Sublet Deal
+            </button>
           </div>
-        ))}
-      </div>
 
-      {/* Create / Edit Deal Modal */}
-      {showModal && (
-        <div className="fixed inset-0 modal-overlay flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="glass-panel w-full max-w-2xl rounded-2xl p-6 shadow-2xl space-y-4 border border-[var(--border-color)] max-h-[90vh] overflow-y-auto">
+          {deals.length === 0 ? (
+            <div className="glass-panel p-10 rounded-2xl border border-[var(--border-color)] text-center space-y-2">
+              <ArrowRightLeft className="h-8 w-8 text-[var(--text-muted)] mx-auto opacity-40" />
+              <div className="font-bold text-sm text-[var(--text-main)]">No Active Sublet Deals</div>
+              <p className="text-xs text-[var(--text-muted)]">Track when you borrow cars from partners and re-rent them to your customers.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {deals.map(deal => (
+                <div key={deal.id} className="glass-panel p-5 rounded-2xl border border-[var(--border-color)] space-y-3">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h4 className="font-bold text-sm text-[var(--text-main)]">{deal.car_make_model}</h4>
+                      <span className="text-[11px] font-mono text-teal-400 font-bold">{deal.car_plate_number}</span>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold">
+                      {deal.status}
+                    </span>
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-[var(--bg-app)] border border-[var(--border-color)] text-xs space-y-1">
+                    <div className="flex justify-between">
+                      <span className="text-[var(--text-muted)]">Partner Agency:</span>
+                      <span className="font-semibold">{deal.supplier_name}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-[var(--text-muted)]">Customer:</span>
+                      <span className="font-semibold">{deal.customer_name}</span>
+                    </div>
+                    <div className="flex justify-between pt-1 border-t border-[var(--border-color)] font-bold text-emerald-400">
+                      <span>Net Profit Margin:</span>
+                      <span className="font-mono">PKR {deal.net_cash_profit?.toLocaleString()}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL: ADD / EDIT PARTNER RENT A CAR */}
+      {/* ======================================================== */}
+      {showPartnerModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
+          <div className="glass-panel w-full max-w-2xl rounded-3xl border border-[var(--border-color)] bg-[var(--bg-card)] shadow-2xl p-6 space-y-5 my-auto animate-scale-up text-left">
             <div className="flex justify-between items-center pb-3 border-b border-[var(--border-color)]">
-              <h3 className="text-lg font-bold text-[var(--text-main)]">
-                {editingDeal ? `Edit Sublet Deal #${editingDeal.id}` : "Log Sourced / Sublet Car Deal"}
-              </h3>
-              <button onClick={() => setShowModal(false)} className="text-[var(--text-muted)] hover:text-[var(--text-main)]">
+              <div>
+                <h3 className="text-lg font-bold text-[var(--text-main)]">
+                  {editingPartner ? "Edit Partner Agency" : "Add Other Rent A Car"}
+                </h3>
+                <p className="text-xs text-[var(--text-muted)]">Register partner rental agency & how many cars they have available</p>
+              </div>
+              <button onClick={() => setShowPartnerModal(false)} className="text-[var(--text-muted)] hover:text-[var(--text-main)]">
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-              {/* Section 1: Supplier & Car Sourced */}
-              <div className="p-3.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-app)]/40 space-y-3">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-amber-500 flex items-center gap-1.5">
-                  <Building2 className="h-3.5 w-3.5" /> 1. Supplier / Car Owner Sourced From
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block font-semibold text-[var(--text-muted)] mb-1">Supplier / Owner Name *</label>
-                    <input type="text" required placeholder="e.g. Usman Car Rentals / Malik" value={form.supplier_name} onChange={e => setForm({...form, supplier_name: e.target.value})} className="w-full app-input rounded-lg p-2" />
-                  </div>
-                  <div>
-                    <label className="block font-semibold text-[var(--text-muted)] mb-1">Supplier Phone *</label>
-                    <input type="text" required placeholder="03001234567" value={form.supplier_phone} onChange={e => setForm({...form, supplier_phone: e.target.value})} className="w-full app-input rounded-lg p-2" />
-                  </div>
-                  <div>
-                    <label className="block font-semibold text-[var(--text-muted)] mb-1">Supplier CNIC</label>
-                    <input type="text" placeholder="35201xxxxxxx" value={form.supplier_cnic || ""} onChange={e => setForm({...form, supplier_cnic: e.target.value})} className="w-full app-input rounded-lg p-2 font-mono" />
-                  </div>
+            <form onSubmit={handlePartnerSubmit} className="space-y-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold mb-1">Agency Name *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Al-Madina Rent A Car"
+                    value={partnerForm.agency_name}
+                    onChange={(e) => setPartnerForm({ ...partnerForm, agency_name: e.target.value })}
+                    className="w-full app-input rounded-xl px-3 py-2 text-xs focus:outline-none"
+                  />
                 </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block font-semibold text-[var(--text-muted)] mb-1">Car Make & Model *</label>
-                    <input type="text" required placeholder="e.g. Toyota Land Cruiser V8" value={form.car_make_model} onChange={e => setForm({...form, car_make_model: e.target.value})} className="w-full app-input rounded-lg p-2" />
-                  </div>
-                  <div>
-                    <label className="block font-semibold text-[var(--text-muted)] mb-1">Plate Number *</label>
-                    <input type="text" required placeholder="e.g. LEM-23-4567" value={form.car_plate_number} onChange={e => setForm({...form, car_plate_number: e.target.value.toUpperCase()})} className="w-full app-input rounded-lg p-2 font-mono" />
-                  </div>
-                  <div>
-                    <label className="block font-semibold text-[var(--text-muted)] mb-1">Color</label>
-                    <input type="text" placeholder="e.g. Black / White" value={form.car_color || ""} onChange={e => setForm({...form, car_color: e.target.value})} className="w-full app-input rounded-lg p-2" />
-                  </div>
+                <div>
+                  <label className="block font-semibold mb-1">Owner / Contact Person</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Haji Rafiq / Manager"
+                    value={partnerForm.contact_person}
+                    onChange={(e) => setPartnerForm({ ...partnerForm, contact_person: e.target.value })}
+                    className="w-full app-input rounded-xl px-3 py-2 text-xs focus:outline-none"
+                  />
                 </div>
               </div>
 
-              {/* Section 2: Client & Rental Schedule */}
-              <div className="p-3.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-app)]/40 space-y-3">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-teal-500 flex items-center gap-1.5">
-                  <Car className="h-3.5 w-3.5" /> 2. Client Rented To & Duration
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block font-semibold text-[var(--text-muted)] mb-1">Client Full Name *</label>
-                    <input type="text" required placeholder="Customer Full Name" value={form.customer_name} onChange={e => setForm({...form, customer_name: e.target.value})} className="w-full app-input rounded-lg p-2" />
-                  </div>
-                  <div>
-                    <label className="block font-semibold text-[var(--text-muted)] mb-1">Client Phone *</label>
-                    <input type="text" required placeholder="03211234567" value={form.customer_phone} onChange={e => setForm({...form, customer_phone: e.target.value})} className="w-full app-input rounded-lg p-2" />
-                  </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block font-semibold mb-1">Phone Number *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="0300-1234567"
+                    value={partnerForm.phone}
+                    onChange={(e) => setPartnerForm({ ...partnerForm, phone: e.target.value })}
+                    className="w-full app-input rounded-xl px-3 py-2 text-xs font-mono focus:outline-none"
+                  />
                 </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block font-semibold text-[var(--text-muted)] mb-1">Start Date</label>
-                    <input type="date" required value={form.start_date} onChange={e => updateDatesAndDays(e.target.value, form.end_date)} className="w-full app-input rounded-lg p-2" />
-                  </div>
-                  <div>
-                    <label className="block font-semibold text-[var(--text-muted)] mb-1">End Date</label>
-                    <input type="date" required value={form.end_date} onChange={e => updateDatesAndDays(form.start_date, e.target.value)} className="w-full app-input rounded-lg p-2" />
-                  </div>
-                  <div>
-                    <label className="block font-semibold text-[var(--text-muted)] mb-1">Rental Days</label>
-                    <input type="number" min="1" value={form.days} onChange={e => updateDatesAndDays(form.start_date, form.end_date, parseInt(e.target.value, 10))} className="w-full app-input rounded-lg p-2 font-mono" />
-                  </div>
+                <div>
+                  <label className="block font-semibold mb-1">WhatsApp</label>
+                  <input
+                    type="text"
+                    placeholder="0300-1234567"
+                    value={partnerForm.whatsapp}
+                    onChange={(e) => setPartnerForm({ ...partnerForm, whatsapp: e.target.value })}
+                    className="w-full app-input rounded-xl px-3 py-2 text-xs font-mono focus:outline-none"
+                  />
                 </div>
-              </div>
-
-              {/* Section 3: Financials - Taken Cost vs Sold Price */}
-              <div className="p-3.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-app)]/40 space-y-3">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-amber-500 flex items-center gap-1.5">
-                  <DollarSign className="h-3.5 w-3.5" /> 3. Sourced Price vs Client Price (Commission)
-                </p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="p-2.5 rounded-lg border border-amber-500/20 bg-amber-500/5 space-y-2">
-                    <span className="font-bold text-[10px] uppercase text-amber-500 block">Supplier Cost (Price Taken)</span>
-                    <div>
-                      <label className="block text-[10px] text-[var(--text-muted)] mb-0.5">Supplier Daily Rate</label>
-                      <input type="number" min="0" value={form.supplier_daily_rate} onChange={e => updateRatesAndExpenses("supplier_daily_rate", e.target.value)} className="w-full app-input rounded-lg p-1.5 font-mono" />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] text-[var(--text-muted)] mb-0.5">Total Sourced Cost (PKR)</label>
-                      <input type="number" min="0" value={form.supplier_total_cost} onChange={e => updateRatesAndExpenses("supplier_total_cost", e.target.value)} className="w-full app-input rounded-lg p-1.5 font-mono font-bold" />
-                    </div>
-                  </div>
-
-                  <div className="p-2.5 rounded-lg border border-teal-500/20 bg-teal-500/5 space-y-2">
-                    <span className="font-bold text-[10px] uppercase text-teal-500 block">Client Price (Price Sold)</span>
-                    <div>
-                      <label className="block text-[10px] text-[var(--text-muted)] mb-0.5">Client Daily Rate</label>
-                      <input type="number" min="0" value={form.client_daily_rate} onChange={e => updateRatesAndExpenses("client_daily_rate", e.target.value)} className="w-full app-input rounded-lg p-1.5 font-mono" />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] text-[var(--text-muted)] mb-0.5">Total Client Rent (PKR)</label>
-                      <input type="number" min="0" value={form.client_total_rent} onChange={e => updateRatesAndExpenses("client_total_rent", e.target.value)} className="w-full app-input rounded-lg p-1.5 font-mono font-bold" />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-2 rounded-lg bg-teal-500/10 border border-teal-500/20 flex justify-between items-center text-xs">
-                  <span className="font-bold text-teal-700 dark:text-teal-400">Gross Commission Made (Client - Supplier):</span>
-                  <span className="font-mono font-extrabold text-teal-700 dark:text-teal-400 text-sm">PKR {form.commission_amount.toLocaleString()}</span>
+                <div>
+                  <label className="block font-semibold mb-1">City</label>
+                  <input
+                    type="text"
+                    placeholder="Lahore"
+                    value={partnerForm.city}
+                    onChange={(e) => setPartnerForm({ ...partnerForm, city: e.target.value })}
+                    className="w-full app-input rounded-xl px-3 py-2 text-xs focus:outline-none"
+                  />
                 </div>
               </div>
 
-              {/* Section 4: Expenses to Cut & Net Cash Profit */}
-              <div className="p-3.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-app)]/40 space-y-3">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-orange-500 flex items-center gap-1.5">
-                  <TrendingUp className="h-3.5 w-3.5" /> 4. Expenses Cut & Net Cash Profit
-                </p>
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-[10px] font-semibold text-[var(--text-muted)] mb-1">Driver / Chauffeur (PKR)</label>
-                    <input type="number" min="0" value={form.driver_expense} onChange={e => updateRatesAndExpenses("driver_expense", e.target.value)} className="w-full app-input rounded-lg p-2 font-mono" />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-semibold text-[var(--text-muted)] mb-1">Fuel Expense (PKR)</label>
-                    <input type="number" min="0" value={form.fuel_expense} onChange={e => updateRatesAndExpenses("fuel_expense", e.target.value)} className="w-full app-input rounded-lg p-2 font-mono" />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-semibold text-[var(--text-muted)] mb-1">Challans / Misc (PKR)</label>
-                    <input type="number" min="0" value={form.other_expense} onChange={e => updateRatesAndExpenses("other_expense", e.target.value)} className="w-full app-input rounded-lg p-2 font-mono" />
-                  </div>
-                </div>
-
-                {/* Final Net Cash Profit Callout */}
-                <div className="p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 flex justify-between items-center">
-                  <div>
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 block">Remaining Cash Profit After Cutting Every Expense</span>
-                    <span className="text-xs text-[var(--text-muted)]">Gross Comm (PKR {form.commission_amount.toLocaleString()}) - Total Expenses (PKR {form.total_expenses.toLocaleString()})</span>
-                  </div>
-                  <span className="text-xl font-extrabold text-emerald-600 dark:text-emerald-400 font-mono">
-                    PKR {form.net_cash_profit.toLocaleString()}
-                  </span>
-                </div>
+              <div>
+                <label className="block font-semibold mb-1">Hub Address / Location</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Main Market, Gulberg, Lahore"
+                  value={partnerForm.address}
+                  onChange={(e) => setPartnerForm({ ...partnerForm, address: e.target.value })}
+                  className="w-full app-input rounded-xl px-3 py-2 text-xs focus:outline-none"
+                />
               </div>
 
-              {/* Section 5: Payments & Remaining Dues */}
-              <div className="p-3.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-app)]/40 space-y-3">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">5. Payments Received & Balances</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="block text-[10px] font-semibold text-[var(--text-muted)]">Client Paid Advance (PKR)</label>
-                    <input type="number" min="0" value={form.client_received_amount} onChange={e => updateRatesAndExpenses("client_received_amount", e.target.value)} className="w-full app-input rounded-lg p-2 font-mono" />
-                    <span className="text-[10px] text-[var(--text-muted)] block">Client Remaining: <b className="text-rose-500 font-mono">PKR {form.client_remaining_balance.toLocaleString()}</b></span>
+              {/* Dynamic Fleet List: What cars do they have? */}
+              <div className="p-3.5 rounded-2xl bg-[var(--bg-app)] border border-[var(--border-color)] space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="font-bold text-[var(--text-main)] flex items-center gap-1.5">
+                    <Car className="h-4 w-4 text-teal-400" />
+                    <span>Their Fleet & Cars Available</span>
                   </div>
+                  <button
+                    type="button"
+                    onClick={addCarRowToPartner}
+                    className="text-[11px] px-2.5 py-1 rounded-lg bg-teal-500/15 text-teal-400 border border-teal-500/30 hover:bg-teal-500/25 font-bold flex items-center gap-1"
+                  >
+                    <Plus className="h-3 w-3" /> Add Car Model
+                  </button>
+                </div>
 
-                  <div className="space-y-1">
-                    <label className="block text-[10px] font-semibold text-[var(--text-muted)]">Paid to Supplier (PKR)</label>
-                    <input type="number" min="0" value={form.supplier_paid_amount} onChange={e => updateRatesAndExpenses("supplier_paid_amount", e.target.value)} className="w-full app-input rounded-lg p-2 font-mono" />
-                    <span className="text-[10px] text-[var(--text-muted)] block">Supplier Payable: <b className="text-amber-500 font-mono">PKR {form.supplier_remaining_payable.toLocaleString()}</b></span>
-                  </div>
+                <div className="space-y-2">
+                  {partnerForm.cars_list.map((c, idx) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        placeholder="Model (e.g. Toyota Prado, Civic, Yaris)"
+                        value={c.model}
+                        onChange={(e) => {
+                          const updated = [...partnerForm.cars_list];
+                          updated[idx].model = e.target.value;
+                          setPartnerForm({ ...partnerForm, cars_list: updated });
+                        }}
+                        className="flex-1 app-input rounded-xl px-3 py-2 text-xs focus:outline-none"
+                      />
+                      <div className="w-24">
+                        <input
+                          type="number"
+                          min="1"
+                          placeholder="Qty (e.g. 3)"
+                          value={c.count}
+                          onChange={(e) => {
+                            const updated = [...partnerForm.cars_list];
+                            updated[idx].count = e.target.value;
+                            setPartnerForm({ ...partnerForm, cars_list: updated });
+                          }}
+                          className="w-full app-input rounded-xl px-2.5 py-2 text-xs font-mono text-center focus:outline-none"
+                        />
+                      </div>
+                      <div className="w-32">
+                        <input
+                          type="number"
+                          placeholder="Rate (PKR/day)"
+                          value={c.daily_rate}
+                          onChange={(e) => {
+                            const updated = [...partnerForm.cars_list];
+                            updated[idx].daily_rate = e.target.value;
+                            setPartnerForm({ ...partnerForm, cars_list: updated });
+                          }}
+                          className="w-full app-input rounded-xl px-2.5 py-2 text-xs font-mono focus:outline-none"
+                        />
+                      </div>
+                      {partnerForm.cars_list.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeCarRowFromPartner(idx)}
+                          className="p-2 text-rose-500 hover:bg-rose-500/10 rounded-lg"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-[var(--text-muted)] mb-1">Deal Status</label>
-                  <select value={form.status} onChange={e => setForm({...form, status: e.target.value})} className="w-full app-input rounded-lg p-2.5">
-                    <option value="Active">Active</option>
-                    <option value="Completed">Completed</option>
-                    <option value="Pending Payment">Pending Payment</option>
-                    <option value="Cancelled">Cancelled</option>
-                  </select>
+                  <label className="block font-semibold mb-1">Commission Terms / Sublet Deal</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 15% discount on daily rates"
+                    value={partnerForm.commission_terms}
+                    onChange={(e) => setPartnerForm({ ...partnerForm, commission_terms: e.target.value })}
+                    className="w-full app-input rounded-xl px-3 py-2 text-xs focus:outline-none"
+                  />
                 </div>
                 <div>
-                  <label className="block font-semibold text-[var(--text-muted)] mb-1">Deal Notes / Terms</label>
-                  <input type="text" placeholder="e.g. Returned with full tank, commission cleared" value={form.notes || ""} onChange={e => setForm({...form, notes: e.target.value})} className="w-full app-input rounded-lg p-2.5" />
+                  <label className="block font-semibold mb-1">Notes / Preferences</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Reliable for northern area 4x4 vehicles"
+                    value={partnerForm.notes}
+                    onChange={(e) => setPartnerForm({ ...partnerForm, notes: e.target.value })}
+                    className="w-full app-input rounded-xl px-3 py-2 text-xs focus:outline-none"
+                  />
                 </div>
               </div>
 
-              <button type="submit" className="w-full btn-accent text-white font-bold py-3 rounded-xl text-sm">
-                {editingDeal ? "Update Sublet Deal" : "Save Sourced Sublet Deal"}
-              </button>
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-[var(--border-color)]">
+                <button
+                  type="button"
+                  onClick={() => setShowPartnerModal(false)}
+                  className="py-2 px-4 rounded-xl border border-[var(--border-color)] text-[var(--text-muted)]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="py-2 px-5 rounded-xl bg-teal-500 text-white font-bold hover:bg-teal-400 shadow-md"
+                >
+                  Save Partner Rent A Car
+                </button>
+              </div>
             </form>
           </div>
         </div>
       )}
+
+      {/* ======================================================== */}
+      {/* MODAL: ADD / EDIT CHAUFFEUR / DRIVER */}
+      {/* ======================================================== */}
+      {showDriverModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
+          <div className="glass-panel w-full max-w-xl rounded-3xl border border-[var(--border-color)] bg-[var(--bg-card)] shadow-2xl p-6 space-y-5 my-auto animate-scale-up text-left">
+            <div className="flex justify-between items-center pb-3 border-b border-[var(--border-color)]">
+              <div>
+                <h3 className="text-lg font-bold text-[var(--text-main)]">
+                  {editingDriver ? "Edit Chauffeur Driver" : "Register Chauffeur / Driver"}
+                </h3>
+                <p className="text-xs text-[var(--text-muted)]">Maintain chauffeur profile, license, and daily wage info</p>
+              </div>
+              <button onClick={() => setShowDriverModal(false)} className="text-[var(--text-muted)] hover:text-[var(--text-main)]">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleDriverSubmit} className="space-y-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold mb-1">Driver Name *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Muhammad Aslam"
+                    value={driverForm.name}
+                    onChange={(e) => setDriverForm({ ...driverForm, name: e.target.value })}
+                    className="w-full app-input rounded-xl px-3 py-2 text-xs focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Phone Number *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="0300-1234567"
+                    value={driverForm.phone}
+                    onChange={(e) => setDriverForm({ ...driverForm, phone: e.target.value })}
+                    className="w-full app-input rounded-xl px-3 py-2 text-xs font-mono focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block font-semibold mb-1">CNIC Number</label>
+                  <input
+                    type="text"
+                    placeholder="35202-xxxxxxx-x"
+                    value={driverForm.cnic}
+                    onChange={(e) => setDriverForm({ ...driverForm, cnic: e.target.value })}
+                    className="w-full app-input rounded-xl px-3 py-2 text-xs font-mono focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">License Number</label>
+                  <input
+                    type="text"
+                    placeholder="LHR-12345"
+                    value={driverForm.license_number}
+                    onChange={(e) => setDriverForm({ ...driverForm, license_number: e.target.value })}
+                    className="w-full app-input rounded-xl px-3 py-2 text-xs font-mono focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Daily Wage (PKR)</label>
+                  <input
+                    type="number"
+                    placeholder="e.g. 2000"
+                    value={driverForm.daily_wage}
+                    onChange={(e) => setDriverForm({ ...driverForm, daily_wage: e.target.value })}
+                    className="w-full app-input rounded-xl px-3 py-2 text-xs font-mono focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block font-semibold mb-1">Driver Type</label>
+                  <select
+                    value={driverForm.driver_type}
+                    onChange={(e) => setDriverForm({ ...driverForm, driver_type: e.target.value })}
+                    className="w-full app-input rounded-xl px-3 py-2 text-xs focus:outline-none"
+                  >
+                    <option value="Freelance">Freelance Driver</option>
+                    <option value="In-House">In-House Staff</option>
+                    <option value="Partner Agency">Partner Agency Driver</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Current Status</label>
+                  <select
+                    value={driverForm.status}
+                    onChange={(e) => setDriverForm({ ...driverForm, status: e.target.value })}
+                    className="w-full app-input rounded-xl px-3 py-2 text-xs focus:outline-none"
+                  >
+                    <option value="Available">Available</option>
+                    <option value="On Duty">On Duty</option>
+                    <option value="Leave">On Leave</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Affiliation / Agency</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Self or Al-Madina"
+                    value={driverForm.agency_affiliation}
+                    onChange={(e) => setDriverForm({ ...driverForm, agency_affiliation: e.target.value })}
+                    className="w-full app-input rounded-xl px-3 py-2 text-xs focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold mb-1">Specialties & Route Expertise</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Northern Areas, Motorway, Wedding VIP"
+                    value={driverForm.specialties}
+                    onChange={(e) => setDriverForm({ ...driverForm, specialties: e.target.value })}
+                    className="w-full app-input rounded-xl px-3 py-2 text-xs focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Notes</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Non-smoker, fluent in Urdu & English"
+                    value={driverForm.notes}
+                    onChange={(e) => setDriverForm({ ...driverForm, notes: e.target.value })}
+                    className="w-full app-input rounded-xl px-3 py-2 text-xs focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-[var(--border-color)]">
+                <button
+                  type="button"
+                  onClick={() => setShowDriverModal(false)}
+                  className="py-2 px-4 rounded-xl border border-[var(--border-color)] text-[var(--text-muted)]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="py-2 px-5 rounded-xl bg-teal-500 text-white font-bold hover:bg-teal-400 shadow-md"
+                >
+                  Save Chauffeur Profile
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

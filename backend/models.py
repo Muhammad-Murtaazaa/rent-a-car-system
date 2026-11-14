@@ -425,3 +425,39 @@ class SupplierDeal(Base):
     status = Column(String, nullable=False, default="Active")  # Active, Completed, Pending Payment, Cancelled
     notes = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+class PartnerAgency(Base):
+    __tablename__ = "partner_agencies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(String, nullable=False, index=True, default="default")
+    agency_name = Column(String, nullable=False)
+    contact_person = Column(String, nullable=True)
+    phone = Column(String, nullable=False)
+    whatsapp = Column(String, nullable=True)
+    city = Column(String, nullable=True, default="Lahore")
+    address = Column(String, nullable=True)
+    total_cars_count = Column(Integer, nullable=False, default=0)
+    available_cars_json = Column(String, nullable=True, default="[]")
+    commission_terms = Column(String, nullable=True)
+    notes = Column(String, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+class ChauffeurDriver(Base):
+    __tablename__ = "chauffeur_drivers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(String, nullable=False, index=True, default="default")
+    name = Column(String, nullable=False)
+    phone = Column(String, nullable=False)
+    cnic = Column(String, nullable=True)
+    license_number = Column(String, nullable=True)
+    license_expiry = Column(String, nullable=True)
+    daily_wage = Column(Float, nullable=False, default=0.0)
+    status = Column(String, nullable=False, default="Available")
+    driver_type = Column(String, nullable=False, default="Freelance")
+    agency_affiliation = Column(String, nullable=True)
+    experience_years = Column(Integer, nullable=True, default=0)
+    specialties = Column(String, nullable=True)
+    notes = Column(String, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)

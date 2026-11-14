@@ -752,7 +752,7 @@ export default function App() {
               { id: "leads", label: "Leads CRM", icon: UserPlus },
               { id: "quotations", label: "Quotations", icon: ClipboardList },
               { id: "bookings", label: "Bookings", icon: Calendar },
-              { id: "suppliers", label: "Suppliers / Sublet", icon: Handshake },
+              { id: "suppliers", label: "Partner Fleet & Drivers", icon: Handshake },
               { id: "invoices-letters", label: "Invoices & Letters", icon: ScrollText },
               { id: "receipts", label: "Receipts", icon: Receipt },
               { id: "employees", label: "Employees", icon: BadgeCheck },
