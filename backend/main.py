@@ -7,7 +7,7 @@ import threading
 import urllib.request
 from datetime import datetime, date, timedelta
 from typing import List, Optional
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, status, Request, Query
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, status, Request, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -73,6 +73,14 @@ def ensure_sqlite_columns():
             ("specific_days_notes", "VARCHAR"),
             ("late_penalty_charge", "FLOAT DEFAULT 0.0"),
             ("car_wash_charge", "FLOAT DEFAULT 0.0"),
+            ("destination", "VARCHAR"),
+            ("pickup_location", "VARCHAR"),
+            ("event_timing", "VARCHAR"),
+            ("road_plan", "VARCHAR"),
+            ("fuel_package", "VARCHAR DEFAULT 'Without Fuel'"),
+            ("cars_qty", "INTEGER DEFAULT 1"),
+            ("total_rent_decided", "FLOAT DEFAULT 0.0"),
+            ("advance_paid", "FLOAT DEFAULT 0.0"),
         ],
         "booked_cars": [
             ("car_wash_charge", "FLOAT DEFAULT 0.0"),
@@ -1067,6 +1075,137 @@ def read_booking_financials(booking_id: int, db: Session = Depends(get_db), tena
 @app.post("/api/bookings", response_model=schemas.Booking)
 def create_booking(booking: schemas.BookingCreate, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
     return crud.create_booking(db=db, booking=booking, tenant_id=tenant_context["tenant_id"])
+
+@app.post("/api/bookings/quick-event")
+def create_quick_event_booking(
+    payload: schemas.QuickEventBookingRequest,
+    db: Session = Depends(get_db),
+    tenant_context: dict = Depends(get_tenant_context)
+):
+    tenant_id = tenant_context["tenant_id"]
+
+    # 1. Check CNIC against Blacklist
+    clean_cnic = payload.cnic.replace("-", "").strip()
+    blacklisted = db.query(models.Blacklist).filter(
+        models.Blacklist.tenant_id == tenant_id,
+        (models.Blacklist.cnic_number == clean_cnic) | (models.Blacklist.cnic_number == payload.cnic.strip())
+    ).first()
+    if blacklisted:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Customer is BLACKLISTED! Reason: {blacklisted.reason_flag}"
+        )
+
+    # 2. Find or create customer
+    customer = db.query(models.Customer).filter(
+        models.Customer.tenant_id == tenant_id,
+        (models.Customer.cnic_number == payload.cnic.strip()) | (models.Customer.cnic_number == clean_cnic)
+    ).first()
+    if not customer:
+        customer = models.Customer(
+            tenant_id=tenant_id,
+            name=payload.client_name.strip(),
+            phone_primary=payload.phone.strip(),
+            cnic_number=payload.cnic.strip(),
+            address=payload.pickup_location or "N/A"
+        )
+        db.add(customer)
+        db.flush()
+
+    # 3. Determine cars list
+    selected_car_ids = payload.car_ids or []
+    if not selected_car_ids:
+        first_available = db.query(models.Car).filter(
+            models.Car.tenant_id == tenant_id,
+            models.Car.status == "Available"
+        ).first()
+        if first_available:
+            selected_car_ids = [first_available.id]
+        else:
+            any_car = db.query(models.Car).filter(models.Car.tenant_id == tenant_id).first()
+            if any_car:
+                selected_car_ids = [any_car.id]
+            else:
+                raise HTTPException(status_code=400, detail="No cars available in fleet to book.")
+
+    booked_cars_list = [
+        schemas.BookedCarCreate(
+            car_id=cid,
+            daily_rate=payload.total_rent / max(1, len(selected_car_ids))
+        )
+        for cid in selected_car_ids
+    ]
+
+    duration_days = max(1, (payload.expected_end_datetime.date() - payload.start_datetime.date()).days or 1)
+    daily_rate_total = payload.total_rent / duration_days
+
+    # 4. Create booking
+    booking_schema = schemas.BookingCreate(
+        customer_id=customer.id,
+        start_datetime=payload.start_datetime,
+        expected_end_datetime=payload.expected_end_datetime,
+        daily_rate=daily_rate_total,
+        is_chauffeur_driven=payload.is_chauffeur_driven or False,
+        chauffeur_daily_wage=0.0,
+        security_deposit_amount=payload.security_deposit_amount or 0.0,
+        security_deposit_type=payload.security_deposit_type or "Cash",
+        security_deposit_status="Held" if (payload.security_deposit_amount or 0) > 0 else "N/A",
+        status="Active" if payload.start_datetime <= datetime.now() else "Reserved",
+        booking_type="Event / Multi-Car",
+        specific_days_notes=payload.car_models_note or "",
+        destination=payload.destination,
+        pickup_location=payload.pickup_location,
+        event_timing=payload.event_timing,
+        road_plan=payload.road_plan,
+        fuel_package=payload.fuel_package or "Without Fuel",
+        cars_qty=payload.cars_qty or len(selected_car_ids),
+        total_rent_decided=payload.total_rent,
+        advance_paid=payload.advance_paid or 0.0,
+        booked_cars=booked_cars_list
+    )
+
+    db_booking = crud.create_booking(db=db, booking=booking_schema, tenant_id=tenant_id)
+
+    # 5. Record advance financial payment if advance was paid
+    adv = payload.advance_paid or 0.0
+    bal = max(0.0, payload.total_rent - adv)
+    financial_record = None
+    if adv > 0:
+        fin_schema = schemas.FinancialCreate(
+            booking_id=db_booking.id,
+            amount_paid=adv,
+            payment_datetime=datetime.now(),
+            payment_method=payload.payment_method or "Cash",
+            balance_due=bal
+        )
+        financial_record = crud.create_financial(db=db, financial=fin_schema, tenant_id=tenant_id)
+
+    db.commit()
+    db.refresh(db_booking)
+
+    return {
+        "status": "success",
+        "booking_id": db_booking.id,
+        "booking": {
+            "id": db_booking.id,
+            "customer_name": customer.name,
+            "customer_phone": customer.phone_primary,
+            "customer_cnic": customer.cnic_number,
+            "event_timing": db_booking.event_timing,
+            "destination": db_booking.destination,
+            "pickup_location": db_booking.pickup_location,
+            "road_plan": db_booking.road_plan,
+            "fuel_package": db_booking.fuel_package,
+            "cars_qty": db_booking.cars_qty,
+            "total_rent": payload.total_rent,
+            "advance_paid": adv,
+            "balance_due": bal,
+            "start_datetime": str(db_booking.start_datetime),
+            "expected_end_datetime": str(db_booking.expected_end_datetime),
+            "status": db_booking.status
+        },
+        "financial_id": financial_record.id if financial_record else None
+    }
 
 @app.put("/api/bookings/{booking_id}", response_model=schemas.Booking)
 def update_booking(booking_id: int, booking_update: schemas.BookingUpdate, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):

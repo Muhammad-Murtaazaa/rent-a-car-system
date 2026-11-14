@@ -175,9 +175,39 @@ class BookingBase(BaseModel):
     specific_days_notes: Optional[str] = None
     late_penalty_charge: Optional[float] = 0.0
     car_wash_charge: Optional[float] = 0.0
+    destination: Optional[str] = None
+    pickup_location: Optional[str] = None
+    event_timing: Optional[str] = None
+    road_plan: Optional[str] = None
+    fuel_package: Optional[str] = "Without Fuel"
+    cars_qty: Optional[int] = 1
+    total_rent_decided: Optional[float] = 0.0
+    advance_paid: Optional[float] = 0.0
 
 class BookingCreate(BookingBase):
     booked_cars: Optional[List[BookedCarCreate]] = None
+
+class QuickEventBookingRequest(BaseModel):
+    client_name: str
+    phone: str
+    cnic: str
+    event_date: Optional[str] = None
+    start_datetime: datetime
+    expected_end_datetime: datetime
+    event_timing: Optional[str] = None
+    destination: Optional[str] = None
+    pickup_location: Optional[str] = None
+    road_plan: Optional[str] = None
+    cars_qty: Optional[int] = 1
+    car_ids: Optional[List[int]] = None
+    car_models_note: Optional[str] = None
+    fuel_package: Optional[str] = "Without Fuel"
+    is_chauffeur_driven: Optional[bool] = False
+    total_rent: float
+    advance_paid: Optional[float] = 0.0
+    payment_method: Optional[str] = "Cash"
+    security_deposit_amount: Optional[float] = 0.0
+    security_deposit_type: Optional[str] = "Cash"
 
 class BookingUpdate(BaseModel):
     car_id: Optional[int] = None
@@ -193,6 +223,14 @@ class BookingUpdate(BaseModel):
     security_deposit_status: Optional[str] = None
     status: Optional[str] = None
     booking_type: Optional[str] = None
+    destination: Optional[str] = None
+    pickup_location: Optional[str] = None
+    event_timing: Optional[str] = None
+    road_plan: Optional[str] = None
+    fuel_package: Optional[str] = None
+    cars_qty: Optional[int] = None
+    total_rent_decided: Optional[float] = None
+    advance_paid: Optional[float] = None
     company_name: Optional[str] = None
     driver_type: Optional[str] = None
     driver_name: Optional[str] = None

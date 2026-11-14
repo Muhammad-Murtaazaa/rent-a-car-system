@@ -4,6 +4,7 @@ import {
   Search, Trash2, Edit2, AlertTriangle, CheckCircle, Check, MessageSquare, FileText, Send, X, Clock, PenTool, TrendingUp, DollarSign, Sun, Moon, Briefcase, Menu, Eye, BarChart3, Download, Printer, PieChart, LineChart, UserPlus, Receipt, BadgeCheck, ClipboardList, ScrollText, Settings as SettingsIcon, Wifi, WifiOff, RefreshCw, Smartphone, Handshake, Sparkles, Lock
 } from "lucide-react";
 import TenantPasswordGate from "./TenantPasswordGate";
+import QuickEventBookingModal from "./QuickEventBookingModal";
 import CarHistoryModal from "./CarHistoryModal";
 import SuperAdminDashboard from "./SuperAdminDashboard";
 import EmployeesView from "./EmployeesView";
@@ -85,6 +86,7 @@ export default function App() {
   });
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [historyCarId, setHistoryCarId] = useState(null);
+  const [showQuickEventBookingModal, setShowQuickEventBookingModal] = useState(false);
 
   // Tenant Authentication & Multi-Tenant Scope State
   const [showTenantLoginModal, setShowTenantLoginModal] = useState(false);
@@ -971,6 +973,7 @@ export default function App() {
             setReceiptBooking={setReceiptBooking}
             setShowAdvanceModal={setShowAdvanceModal}
             clearAdvanceSignature={clearAdvanceSignature}
+            onOpenQuickBooking={() => setShowQuickEventBookingModal(true)}
           />
         )}
         {activeTab === "fleet" && (
@@ -1329,6 +1332,17 @@ export default function App() {
           </div>
         )}
 
+        <QuickEventBookingModal
+          isOpen={showQuickEventBookingModal}
+          onClose={() => setShowQuickEventBookingModal(false)}
+          cars={cars}
+          checkCnicBlacklist={checkCnicBlacklist}
+          onBookingCreated={() => {
+            fetchData();
+          }}
+          branding={branding}
+        />
+
         <CarHistoryModal 
           isOpen={showHistoryModal} 
           onClose={() => setShowHistoryModal(false)} 
@@ -1436,7 +1450,8 @@ export default function App() {
 // ==========================================
 function DashboardView({ 
   alerts, cars, bookings, financials, maintenance, investors = [], shareholders = [],
-  reportDate, setReportDate, setReceiptBooking, setShowAdvanceModal, clearAdvanceSignature 
+  reportDate, setReportDate, setReceiptBooking, setShowAdvanceModal, clearAdvanceSignature,
+  onOpenQuickBooking
 }) {
   const activeAlerts = alerts;
   const totalVehicles = cars.length;
@@ -1464,13 +1479,46 @@ function DashboardView({
 
   return (
     <div className="space-y-8">
-      <div className="flex justify-between items-start">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h2 className="text-2xl md:text-3xl font-semibold tracking-tight text-[var(--text-main)]">Dashboard</h2>
           <p className="text-[var(--text-muted)] text-sm mt-1.5 max-w-xl">
             Live fleet, payments, maintenance, and investor payout cashflow — one synced ledger.
           </p>
         </div>
+        <button
+          type="button"
+          onClick={onOpenQuickBooking}
+          className="py-2.5 px-4 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-400 hover:to-emerald-500 text-white font-bold text-xs shadow-lg shadow-teal-500/25 flex items-center gap-2 transition-all transform active:scale-95 shrink-0"
+        >
+          <Sparkles className="h-4 w-4" />
+          <span>+ Quick Event Booking</span>
+        </button>
+      </div>
+
+      {/* Quick Action Hero Banner */}
+      <div className="p-4 sm:p-5 rounded-2xl border border-teal-500/30 bg-gradient-to-r from-teal-500/10 via-emerald-500/5 to-transparent flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm">
+        <div className="flex items-center gap-3.5">
+          <div className="w-11 h-11 rounded-2xl bg-teal-500/20 border border-teal-500/40 flex items-center justify-center text-teal-400 shrink-0 shadow-sm">
+            <Car className="h-5 w-5" />
+          </div>
+          <div>
+            <h3 className="font-bold text-sm sm:text-base text-[var(--text-main)]">
+              Fast Event & Multi-Car Booking
+            </h3>
+            <p className="text-xs text-[var(--text-muted)] mt-0.5">
+              Add client details, CNIC ID, destination, pickup, road plan, fuel package, rent & advance payment in one step.
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onOpenQuickBooking}
+          className="w-full md:w-auto py-2.5 px-5 rounded-xl bg-teal-500 hover:bg-teal-400 text-white text-xs font-bold shadow-md shadow-teal-500/20 flex items-center justify-center gap-2 transition-all shrink-0"
+        >
+          <Sparkles className="h-4 w-4" />
+          <span>Open Booking Form</span>
+        </button>
       </div>
 
       {/* KPI Cards */}
