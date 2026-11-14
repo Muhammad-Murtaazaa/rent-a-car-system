@@ -1336,9 +1336,11 @@ def get_saas_stats(
 @app.get("/api/tenant/branding")
 def get_tenant_branding(
     db: Session = Depends(get_db), 
-    tenant_context: dict = Depends(get_tenant_context)
+    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
+    x_forwarded_host: Optional[str] = Header(None, alias="X-Forwarded-Host"),
+    host: Optional[str] = Header(None)
 ):
-    tenant_id = tenant_context["tenant_id"]
+    tenant_id = auth.resolve_tenant_id_from_request(x_tenant_id, x_forwarded_host, host)
     db_tenant = crud.get_tenant(db, tenant_id)
     all_default_flags = [
         "dashboard", "fleet", "customers", "leads", "quotations", "bookings",

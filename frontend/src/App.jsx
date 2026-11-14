@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
 import { 
   Car, Users, Calendar, ShieldAlert, Wrench, Wallet, Plus, 
-  Search, Trash2, Edit2, AlertTriangle, CheckCircle, Check, MessageSquare, FileText, Send, X, Clock, PenTool, TrendingUp, DollarSign, Sun, Moon, Briefcase, Menu, Eye, BarChart3, Download, Printer, PieChart, LineChart, UserPlus, Receipt, BadgeCheck, ClipboardList, ScrollText, Settings as SettingsIcon, Wifi, WifiOff, RefreshCw, Smartphone, Handshake, Sparkles
+  Search, Trash2, Edit2, AlertTriangle, CheckCircle, Check, MessageSquare, FileText, Send, X, Clock, PenTool, TrendingUp, DollarSign, Sun, Moon, Briefcase, Menu, Eye, BarChart3, Download, Printer, PieChart, LineChart, UserPlus, Receipt, BadgeCheck, ClipboardList, ScrollText, Settings as SettingsIcon, Wifi, WifiOff, RefreshCw, Smartphone, Handshake, Sparkles, Lock
 } from "lucide-react";
+import TenantPasswordGate from "./TenantPasswordGate";
 import CarHistoryModal from "./CarHistoryModal";
 import SuperAdminDashboard from "./SuperAdminDashboard";
 import EmployeesView from "./EmployeesView";
@@ -53,14 +54,15 @@ export default function App() {
   const activeTenantId = (typeof window !== "undefined" && localStorage.getItem("active_tenant_id")) || "default";
   const isTenantWorkspace = isDedicatedTenantHost || activeTenantId !== "default";
 
-  const tenantUser = (() => {
+  const [tenantToken, setTenantToken] = useState(() => (typeof window !== "undefined" && localStorage.getItem("tenant_token")) || "");
+  const [tenantUser, setTenantUser] = useState(() => {
     try {
       const u = typeof window !== "undefined" && localStorage.getItem("tenant_user");
       return u ? JSON.parse(u) : null;
     } catch {
       return null;
     }
-  })();
+  });
 
   const [userRole, setUserRole] = useState(() => {
     const isDedicatedHost = typeof window !== "undefined" &&
@@ -130,6 +132,8 @@ export default function App() {
   const handleTenantLogout = () => {
     localStorage.removeItem("tenant_token");
     localStorage.removeItem("tenant_user");
+    setTenantToken("");
+    setTenantUser(null);
     if (!isDedicatedTenantHost) {
       localStorage.setItem("active_tenant_id", "default");
     }
@@ -575,6 +579,23 @@ export default function App() {
     );
   }
 
+  // Tenant Workspace Password Protection Gate:
+  // When accessing a dedicated tenant subdomain (such as azeem-rent-a-car.omnysync.com) or active tenant workspace,
+  // require password authentication before displaying any part of the system!
+  if (isTenantWorkspace && !tenantToken) {
+    return (
+      <TenantPasswordGate
+        branding={branding}
+        tenantId={activeTenantId}
+        onLoginSuccess={(token, user) => {
+          setTenantToken(token);
+          setTenantUser(user);
+          if (user?.role) setUserRole(user.role);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="flex flex-col md:flex-row min-h-screen min-h-[100dvh] bg-[var(--bg-app)] text-[var(--text-main)] overflow-x-hidden">
       
@@ -619,6 +640,17 @@ export default function App() {
           >
             {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </button>
+          {isTenantWorkspace && (
+            <button 
+              type="button"
+              onClick={handleTenantLogout} 
+              className="p-2.5 min-h-[44px] min-w-[44px] rounded-lg border border-[var(--border-color)] text-[var(--text-muted)] hover:text-rose-400 hover:border-rose-500/30 hover:bg-rose-500/10 transition-colors"
+              aria-label="Lock / Sign Out"
+              title="Lock / Sign Out"
+            >
+              <Lock className="h-4 w-4" />
+            </button>
+          )}
           <button 
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
             className="p-2.5 min-h-[44px] min-w-[44px] rounded-lg border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--tr-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-color)]"
@@ -688,6 +720,17 @@ export default function App() {
               >
                 {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
               </button>
+              {isTenantWorkspace && (
+                <button 
+                  type="button"
+                  onClick={handleTenantLogout} 
+                  className="hidden md:inline-flex p-2 rounded-lg border border-[var(--border-color)] text-[var(--text-muted)] hover:text-rose-400 hover:border-rose-500/30 hover:bg-rose-500/10 transition-colors"
+                  aria-label="Lock / Sign Out"
+                  title="Lock / Sign Out"
+                >
+                  <Lock className="h-4 w-4" />
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setMobileMenuOpen(false)}

@@ -51,6 +51,22 @@ def decode_access_token(token: str) -> Dict:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+# Helper to identify requested tenant from Subdomain or Header
+def resolve_tenant_id_from_request(
+    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
+    x_forwarded_host: Optional[str] = Header(None, alias="X-Forwarded-Host"),
+    host: Optional[str] = Header(None)
+) -> str:
+    effective_host = x_forwarded_host or host
+    if effective_host:
+        host_clean = effective_host.split(":")[0]
+        parts = host_clean.split(".")
+        if len(parts) >= 2:
+            subdomain = parts[0].lower()
+            if subdomain not in ("www", "localhost", "127", "127.0.0.1", "racms", "demo", "app", "rental"):
+                return subdomain
+    return (x_tenant_id or "default").strip().lower()
+
 # Dependency injection for tenant isolation and authentication
 def get_tenant_context(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
@@ -61,7 +77,7 @@ def get_tenant_context(
 ) -> Dict:
     """
     Extracts tenant identity and role.
-    Prefer JWT. Demo header fallbacks only when ALLOW_DEMO_AUTH=1 (offline default).
+    Prefer JWT. Dedicated tenant subdomains ALWAYS require authentication.
     """
     # 1. Check JWT first
     if credentials:
@@ -79,10 +95,21 @@ def get_tenant_context(
         except JWTError:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid credentials or expired token",
+                detail="Invalid credentials or expired session",
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
+    target_tenant = resolve_tenant_id_from_request(x_tenant_id, x_forwarded_host, host)
+
+    # Dedicated agency tenant workspaces ALWAYS require password login
+    if target_tenant != "default":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required to access this agency workspace.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # For default demo / local development fallback
     if not ALLOW_DEMO_AUTH:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -91,30 +118,6 @@ def get_tenant_context(
         )
 
     resolved_role = x_test_role or "desk_staff"
-
-    # 2. Check subdomain wildcard header (host verification)
-    effective_host = x_forwarded_host or host
-    if effective_host:
-        host_clean = effective_host.split(":")[0]
-        parts = host_clean.split(".")
-        if len(parts) >= 2:
-            subdomain = parts[0]
-            if subdomain not in ("www", "localhost", "127", "127.0.0.1", "racms", "demo", "app", "rental"):
-                try:
-                    from backend.database import SessionLocal
-                    from backend import models
-                    with SessionLocal() as db:
-                        t = db.query(models.Tenant).filter(models.Tenant.id == subdomain).first()
-                        if t:
-                            return {"tenant_id": subdomain, "role": resolved_role}
-                except Exception:
-                    pass
-
-    # 3. Fallback to X-Tenant-ID header
-    if x_tenant_id:
-        return {"tenant_id": x_tenant_id, "role": resolved_role}
-
-    # For local/testing development fallback
     return {"tenant_id": "default", "role": resolved_role}
 
 def require_roles(allowed_roles: list[str]):
