@@ -91,6 +91,12 @@ def get_tenant_context(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Invalid token: tenant_id missing"
                 )
+            if role == "super_admin":
+                target_tenant = resolve_tenant_id_from_request(x_tenant_id, x_forwarded_host, host)
+                return {
+                    "tenant_id": target_tenant if target_tenant != "system" else "default",
+                    "role": "super_admin"
+                }
             return {"tenant_id": tenant_id, "role": role}
         except JWTError:
             raise HTTPException(

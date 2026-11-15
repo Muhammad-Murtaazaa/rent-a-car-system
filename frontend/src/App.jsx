@@ -52,7 +52,18 @@ export default function App() {
     window.location.hostname !== "127.0.0.1" &&
     !window.location.hostname.startsWith("13.140.");
 
-  const activeTenantId = (typeof window !== "undefined" && localStorage.getItem("active_tenant_id")) || "default";
+  const activeTenantId = (() => {
+    if (typeof window === "undefined") return "default";
+    const host = window.location.hostname;
+    const parts = host.split(".");
+    if (parts.length >= 3 && !["www", "racms", "localhost", "127"].includes(parts[0])) {
+      return parts[0].toLowerCase();
+    }
+    const urlParams = new URLSearchParams(window.location.search);
+    const q = urlParams.get("tenant") || urlParams.get("t");
+    if (q) return q.toLowerCase().trim();
+    return localStorage.getItem("active_tenant_id") || "default";
+  })();
   const isTenantWorkspace = isDedicatedTenantHost || activeTenantId !== "default";
 
   const [tenantToken, setTenantToken] = useState(() => (typeof window !== "undefined" && localStorage.getItem("tenant_token")) || "");
@@ -222,6 +233,16 @@ export default function App() {
   useEffect(() => {
     document.documentElement.className = theme;
   }, [theme]);
+
+  // Handle session expiration cleanly if tenant token is rejected
+  useEffect(() => {
+    const handleSessionExpired = () => {
+      setTenantToken("");
+      setTenantUser(null);
+    };
+    window.addEventListener("racms-session-expired", handleSessionExpired);
+    return () => window.removeEventListener("racms-session-expired", handleSessionExpired);
+  }, []);
 
   // Lock page scroll when mobile drawer is open
   useEffect(() => {

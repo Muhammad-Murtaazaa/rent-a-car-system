@@ -7,6 +7,68 @@ let dbPromise = null;
 let isSyncing = false;
 const originalFetch = window.fetch.bind(window);
 
+// Build augmented headers with active tenant context & auth tokens for every API request
+export function getAugmentedHeaders(initHeaders, url = "") {
+  const h = new Headers(
+    initHeaders instanceof Headers
+      ? initHeaders
+      : (initHeaders ? initHeaders : {})
+  );
+
+  if (typeof window !== "undefined") {
+    let activeTenant = localStorage.getItem("active_tenant_id");
+    if (!activeTenant || activeTenant === "default") {
+      const host = window.location.hostname;
+      const parts = host.split(".");
+      if (parts.length >= 3 && !["www", "racms", "localhost", "127"].includes(parts[0])) {
+        activeTenant = parts[0].toLowerCase();
+        localStorage.setItem("active_tenant_id", activeTenant);
+      }
+    }
+    if (!activeTenant) activeTenant = "default";
+
+    const tenantToken = localStorage.getItem("tenant_token");
+    const superAdminToken = localStorage.getItem("saas_super_admin_token");
+
+    if (!h.has("X-Tenant-ID")) {
+      h.set("X-Tenant-ID", activeTenant);
+    }
+
+    if (!h.has("Authorization")) {
+      if (url.includes("/api/saas-admin/") && superAdminToken) {
+        h.set("Authorization", `Bearer ${superAdminToken}`);
+      } else if (tenantToken) {
+        h.set("Authorization", `Bearer ${tenantToken}`);
+      } else if (superAdminToken) {
+        h.set("Authorization", `Bearer ${superAdminToken}`);
+      }
+    }
+  }
+
+  const out = {};
+  h.forEach((val, key) => {
+    out[key] = val;
+  });
+  return out;
+}
+
+export function handleAuthFailure() {
+  if (typeof window === "undefined") return;
+  const isDedicatedHost =
+    window.location.hostname !== "racms.omnysync.com" &&
+    window.location.hostname !== "localhost" &&
+    window.location.hostname !== "127.0.0.1" &&
+    !window.location.hostname.startsWith("13.140.");
+
+  const hasToken = localStorage.getItem("tenant_token");
+  if (hasToken || isDedicatedHost) {
+    console.warn("Tenant session invalid or expired. Resetting session.");
+    localStorage.removeItem("tenant_token");
+    localStorage.removeItem("tenant_user");
+    window.dispatchEvent(new CustomEvent("racms-session-expired"));
+  }
+}
+
 function openDB() {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise((resolve, reject) => {
@@ -175,13 +237,18 @@ export async function syncOfflineQueue() {
 
     for (const item of items) {
       try {
+        const replayHeaders = getAugmentedHeaders(item.headers, item.url);
+        if (item.bodyType === "formdata") {
+          delete replayHeaders["Content-Type"];
+          delete replayHeaders["content-type"];
+        }
         const fetchOpts = {
           method: item.method,
-          headers: item.bodyType === "formdata" ? undefined : (item.headers || { "Content-Type": "application/json" }),
+          headers: item.bodyType === "formdata" ? undefined : replayHeaders,
           body: reconstructBody(item)
         };
         const res = await originalFetch(item.url, fetchOpts);
-        if (res.ok || (res.status >= 400 && res.status < 500)) {
+        if (res.ok || (res.status >= 400 && res.status < 500 && res.status !== 401)) {
           await idbDelete(OUTBOX_STORE, item.id);
           if (res.ok) syncedCount++;
         } else {
@@ -236,15 +303,26 @@ export function initOfflineSync() {
     const urlStr = typeof input === "string" ? input : input?.url || "";
     const method = (init.method || (typeof input !== "string" && input?.method) || "GET").toUpperCase();
 
-    const isApiCall = urlStr.startsWith("/api/") && !urlStr.startsWith("/api/health") && !urlStr.startsWith("/api/auth/");
+    const isApiCall = (urlStr.startsWith("/api/") || urlStr.includes("/api/")) && !urlStr.includes("/api/health");
     if (!isApiCall) {
       return originalFetch(input, init);
+    }
+
+    const mergedHeaders = getAugmentedHeaders(init.headers || (typeof input !== "string" ? input?.headers : null), urlStr);
+    const augmentedInit = { ...init, headers: mergedHeaders };
+
+    // Don't offline-cache or intercept /api/auth/ calls (e.g. login)
+    if (urlStr.includes("/api/auth/")) {
+      return originalFetch(input, augmentedInit);
     }
 
     // 1. GET Requests: Network-first, cache to IDB, fallback to IDB + optimistic outbox items
     if (method === "GET") {
       try {
-        const res = await originalFetch(input, init);
+        const res = await originalFetch(input, augmentedInit);
+        if (res.status === 401) {
+          handleAuthFailure();
+        }
         if (res.ok) {
           const clone = res.clone();
           clone.json().then((data) => {
@@ -272,19 +350,11 @@ export function initOfflineSync() {
 
     // 2. Mutations (POST/PUT/PATCH/DELETE): Try online first, queue into IndexedDB if offline
     const queueMutation = async () => {
-      const headersObj = {};
-      if (init.headers) {
-        if (init.headers instanceof Headers) {
-          init.headers.forEach((v, k) => { headersObj[k] = v; });
-        } else {
-          Object.assign(headersObj, init.headers);
-        }
-      }
       const { bodyType, bodyData, previewObj } = await serializeBody(init.body);
       const id = await idbPut(OUTBOX_STORE, {
         url: urlStr,
         method,
-        headers: headersObj,
+        headers: mergedHeaders,
         bodyType,
         bodyData,
         previewObj,
@@ -304,7 +374,10 @@ export function initOfflineSync() {
     }
 
     try {
-      const res = await originalFetch(input, init);
+      const res = await originalFetch(input, augmentedInit);
+      if (res.status === 401) {
+        handleAuthFailure();
+      }
       return res;
     } catch {
       return queueMutation();
