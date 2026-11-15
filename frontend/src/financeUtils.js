@@ -83,6 +83,19 @@ export function sumOutstanding(financials) {
   return Object.values(latest).reduce((acc, f) => acc + (Number(f.balance_due) || 0), 0);
 }
 
+/** Outstanding dues for the Dashboard: what customers still owe on bookings
+ * whose car is currently out (status "Active"), computed exactly like the
+ * Bookings list computes each booking's remaining balance (estimated charge
+ * minus payments). sumOutstanding() above only sees bookings that already
+ * have a payment row (it sums the balance_due snapshot stored on the latest
+ * payment), so a booking with nothing paid yet contributed 0 to the old
+ * Dashboard figure no matter how much was owed. */
+export function sumOutstandingFromBookings(bookings, financials) {
+  return (bookings || [])
+    .filter((b) => b.status === "Active")
+    .reduce((acc, b) => acc + Math.max(0, estimatedBookingCharge(b) - sumPaidForBooking(financials, b.id)), 0);
+}
+
 /** Cash out: workshop / maintenance costs */
 export function sumMaintenanceOut(maintenance) {
   return (maintenance || []).reduce((acc, m) => acc + (Number(m.cost) || 0), 0);

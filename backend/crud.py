@@ -55,6 +55,12 @@ def update_car(db: Session, car_id: int, car_update: schemas.CarUpdate, tenant_i
     if not db_car:
         return None
     payload = car_update.dict(exclude_unset=True)
+    # Duplicate plate on update used to crash with a 500 (UNIQUE constraint);
+    # create returns a clean 400 for the same case - mirror it here.
+    if payload.get("plate_number"):
+        clash = get_car_by_plate(db, payload["plate_number"], tenant_id)
+        if clash and clash.id != car_id:
+            raise HTTPException(status_code=400, detail="Plate number already registered")
     # Don't let a blind "Available" overwrite Active/Reserved bookings
     if payload.get("status") == "Available":
         open_bk = db.query(models.Booking).join(models.Booking.booked_cars, isouter=True).filter(
@@ -296,12 +302,24 @@ def update_booking(db: Session, booking_id: int, booking_update: schemas.Booking
     if not db_booking:
         return None
 
+    # Reassigning to a customer that does not exist (or belongs to another
+    # tenant) used to crash with a 500 FK error at commit; create returns
+    # 404 for the same input.
+    if booking_update.customer_id is not None:
+        if not get_customer(db, booking_update.customer_id, tenant_id):
+            raise HTTPException(status_code=404, detail="Customer not found")
+
     old_car_id = db_booking.car_id
     
     # If updating dates/car, re-run overlap check
     new_car_id = booking_update.car_id if booking_update.car_id is not None else db_booking.car_id
     new_start = booking_update.start_datetime if booking_update.start_datetime is not None else db_booking.start_datetime
     new_end = booking_update.expected_end_datetime if booking_update.expected_end_datetime is not None else db_booking.expected_end_datetime
+
+    # When the caller changes the dates, the merged range must stay sane
+    # (create enforces the same rule in the schema validator).
+    if (booking_update.start_datetime is not None or booking_update.expected_end_datetime is not None) and new_end <= new_start:
+        raise HTTPException(status_code=400, detail="Booking end must be after start")
 
     # If updating dates/car and the booking is Active/Reserved
     status_val = booking_update.status if booking_update.status is not None else db_booking.status

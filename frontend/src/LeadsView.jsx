@@ -76,7 +76,7 @@ export default function LeadsView({ leads = [], cars = [], branding, fetchData, 
       setEditingLead(null);
       fetchData();
     } else {
-      const err = await res.json();
+      const err = await res.json().catch(() => ({}));
       alert(err.detail || "Failed to save lead.");
     }
   };
@@ -84,7 +84,12 @@ export default function LeadsView({ leads = [], cars = [], branding, fetchData, 
   const handleDelete = async (id) => {
     if (!window.confirm("Remove this customer lead?")) return;
     const res = await fetch(`/api/leads/${id}`, { method: "DELETE" });
-    if (res.ok) fetchData();
+    if (res.ok) {
+      fetchData();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      alert(err.detail || "Failed to delete lead.");
+    }
   };
 
   const handleQuickStatus = async (lead, newStatus) => {
@@ -93,7 +98,12 @@ export default function LeadsView({ leads = [], cars = [], branding, fetchData, 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: newStatus })
     });
-    if (res.ok) fetchData();
+    if (res.ok) {
+      fetchData();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      alert(err.detail || "Failed to update lead status.");
+    }
   };
 
   const sendWhatsApp = (lead) => {

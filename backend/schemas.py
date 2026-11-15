@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from datetime import datetime, date
 from typing import Optional, List, Dict, Any
 
@@ -141,13 +141,13 @@ class Customer(CustomerBase):
 # Bookings
 class BookedCarBase(BaseModel):
     car_id: int
-    daily_rate: float
+    daily_rate: float = Field(..., ge=0)
     start_odometer: Optional[int] = 0
     return_odometer: Optional[int] = 0
     fuel_level_on_start: Optional[str] = "Full"
     fuel_level_on_return: Optional[str] = "Full"
-    extra_fuel_charge: Optional[float] = 0.0
-    structural_damage_charge: Optional[float] = 0.0
+    extra_fuel_charge: Optional[float] = Field(0.0, ge=0)
+    structural_damage_charge: Optional[float] = Field(0.0, ge=0)
     car_wash_charge: Optional[float] = 0.0
     overtime_charge: Optional[float] = 0.0
     was_given_washed: Optional[bool] = True
@@ -170,10 +170,10 @@ class BookingBase(BaseModel):
     start_datetime: datetime
     expected_end_datetime: datetime
     actual_return_datetime: Optional[datetime] = None
-    daily_rate: float
+    daily_rate: float = Field(..., ge=0)
     is_chauffeur_driven: bool = False
-    chauffeur_daily_wage: float = 0.0
-    security_deposit_amount: float = 0.0
+    chauffeur_daily_wage: float = Field(0.0, ge=0)
+    security_deposit_amount: float = Field(0.0, ge=0)
     security_deposit_type: str  # Cash, Cheque, Token/Item
     security_deposit_status: str = "Held"  # Held, Refunded, Withheld
     status: str = "Active"  # Active, Reserved, Completed, Cancelled
@@ -185,16 +185,24 @@ class BookingBase(BaseModel):
     driver_cnic: Optional[str] = None
     billable_days: Optional[int] = None
     specific_days_notes: Optional[str] = None
-    late_penalty_charge: Optional[float] = 0.0
-    car_wash_charge: Optional[float] = 0.0
+    late_penalty_charge: Optional[float] = Field(0.0, ge=0)
+    car_wash_charge: Optional[float] = Field(0.0, ge=0)
     destination: Optional[str] = None
     pickup_location: Optional[str] = None
     event_timing: Optional[str] = None
     road_plan: Optional[str] = None
     fuel_package: Optional[str] = "Without Fuel"
     cars_qty: Optional[int] = 1
-    total_rent_decided: Optional[float] = 0.0
-    advance_paid: Optional[float] = 0.0
+    total_rent_decided: Optional[float] = Field(0.0, ge=0)
+    advance_paid: Optional[float] = Field(0.0, ge=0)
+
+    @model_validator(mode="after")
+    def _end_after_start(self):
+        # The quick-event path has always enforced this; the main booking
+        # path did not, so inverted/zero-length bookings were persisted.
+        if self.expected_end_datetime <= self.start_datetime:
+            raise ValueError("expected_end_datetime must be after start_datetime")
+        return self
 
 class BookingCreate(BookingBase):
     booked_cars: Optional[List[BookedCarCreate]] = None
@@ -237,10 +245,10 @@ class BookingUpdate(BaseModel):
     start_datetime: Optional[datetime] = None
     expected_end_datetime: Optional[datetime] = None
     actual_return_datetime: Optional[datetime] = None
-    daily_rate: Optional[float] = None
+    daily_rate: Optional[float] = Field(None, ge=0)
     is_chauffeur_driven: Optional[bool] = None
-    chauffeur_daily_wage: Optional[float] = None
-    security_deposit_amount: Optional[float] = None
+    chauffeur_daily_wage: Optional[float] = Field(None, ge=0)
+    security_deposit_amount: Optional[float] = Field(None, ge=0)
     security_deposit_type: Optional[str] = None
     security_deposit_status: Optional[str] = None
     status: Optional[str] = None
@@ -251,8 +259,8 @@ class BookingUpdate(BaseModel):
     road_plan: Optional[str] = None
     fuel_package: Optional[str] = None
     cars_qty: Optional[int] = None
-    total_rent_decided: Optional[float] = None
-    advance_paid: Optional[float] = None
+    total_rent_decided: Optional[float] = Field(None, ge=0)
+    advance_paid: Optional[float] = Field(None, ge=0)
     company_name: Optional[str] = None
     driver_type: Optional[str] = None
     driver_name: Optional[str] = None
@@ -260,8 +268,8 @@ class BookingUpdate(BaseModel):
     driver_cnic: Optional[str] = None
     billable_days: Optional[int] = None
     specific_days_notes: Optional[str] = None
-    late_penalty_charge: Optional[float] = None
-    car_wash_charge: Optional[float] = None
+    late_penalty_charge: Optional[float] = Field(None, ge=0)
+    car_wash_charge: Optional[float] = Field(None, ge=0)
     booked_cars: Optional[List[BookedCarCreate]] = None
 
 class Booking(BookingBase):
@@ -296,7 +304,7 @@ class Financial(FinancialBase):
 class MaintenanceLogBase(BaseModel):
     car_id: int
     log_type: str  # Oil Change, Repair, Tuning, Token Tax, Vehicle Fitness
-    cost: float
+    cost: float = Field(..., ge=0)
     execution_date: date
     next_due_date_or_odometer: Optional[str] = None
     notes: Optional[str] = None
@@ -608,7 +616,7 @@ class EmployeeBase(BaseModel):
     address: Optional[str] = None
     license_number: Optional[str] = None
     salary_type: str = "Monthly"
-    salary_amount: float = 0.0
+    salary_amount: float = Field(0.0, ge=0)
     joining_date: date
     status: str = "Active"
     notes: Optional[str] = None
@@ -624,7 +632,7 @@ class EmployeeUpdate(BaseModel):
     address: Optional[str] = None
     license_number: Optional[str] = None
     salary_type: Optional[str] = None
-    salary_amount: Optional[float] = None
+    salary_amount: Optional[float] = Field(None, ge=0)
     joining_date: Optional[date] = None
     status: Optional[str] = None
     notes: Optional[str] = None
@@ -688,17 +696,23 @@ class QuotationBase(BaseModel):
     vehicle_description: str
     start_date: date
     end_date: date
-    days: int = 1
-    daily_rate: float = 0.0
+    days: int = Field(1, ge=1)
+    daily_rate: float = Field(0.0, ge=0)
     chauffeur_included: bool = False
-    chauffeur_daily_rate: float = 0.0
-    discount_amount: float = 0.0
-    tax_percentage: float = 0.0
+    chauffeur_daily_rate: float = Field(0.0, ge=0)
+    discount_amount: float = Field(0.0, ge=0)
+    tax_percentage: float = Field(0.0, ge=0, le=100)
     total_amount: float = 0.0
     valid_until: Optional[date] = None
     status: str = "Draft"
     items: Optional[List[Dict]] = []
     notes: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _end_not_before_start(self):
+        if self.end_date < self.start_date:
+            raise ValueError("end_date must not be before start_date")
+        return self
 
 class QuotationCreate(QuotationBase):
     pass
@@ -712,12 +726,12 @@ class QuotationUpdate(BaseModel):
     vehicle_description: Optional[str] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
-    days: Optional[int] = None
-    daily_rate: Optional[float] = None
+    days: Optional[int] = Field(None, ge=1)
+    daily_rate: Optional[float] = Field(None, ge=0)
     chauffeur_included: Optional[bool] = None
-    chauffeur_daily_rate: Optional[float] = None
-    discount_amount: Optional[float] = None
-    tax_percentage: Optional[float] = None
+    chauffeur_daily_rate: Optional[float] = Field(None, ge=0)
+    discount_amount: Optional[float] = Field(None, ge=0)
+    tax_percentage: Optional[float] = Field(None, ge=0, le=100)
     total_amount: Optional[float] = None
     valid_until: Optional[date] = None
     status: Optional[str] = None

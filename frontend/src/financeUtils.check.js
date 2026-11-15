@@ -5,6 +5,7 @@
 import {
   sumCashIn,
   sumOutstanding,
+  sumOutstandingFromBookings,
   sumMaintenanceOut,
   sumPayoutsOut,
   operatingNet,
@@ -59,6 +60,20 @@ assert(payouts.length === 1 && payouts[0].investor_name === "Ali", "flatten payo
 
 assert(sumCashIn(financials) === 15000, "cash in should be 15000");
 assert(sumOutstanding(financials) === 1000, "outstanding should use latest balance only (1000)");
+// Dashboard dues: booking 1 is Active, 2 days x 5000 = 10000 charge, 15000
+// paid across rows is impossible here (paid sums per booking below), so use
+// a dedicated fixture: Active booking owes charge - paid; a booking with NO
+// payment rows must still count (the old dashboard figure missed it).
+const duesBookings = [
+  { id: 101, status: "Active", start_datetime: "2026-11-10T09:00:00", expected_end_datetime: "2026-11-12T09:00:00", daily_rate: 10000 },
+  { id: 102, status: "Active", start_datetime: "2026-11-10T09:00:00", expected_end_datetime: "2026-11-13T09:00:00", daily_rate: 12000 },
+  { id: 103, status: "Reserved", start_datetime: "2026-12-01T09:00:00", expected_end_datetime: "2026-12-03T09:00:00", daily_rate: 10000 },
+  { id: 104, status: "Completed", start_datetime: "2026-11-01T09:00:00", expected_end_datetime: "2026-11-02T09:00:00", daily_rate: 9000 },
+];
+const duesFinancials = [
+  { booking_id: 102, amount_paid: 20000, payment_datetime: "2026-11-10T10:00:00", balance_due: 16000 },
+];
+assert(sumOutstandingFromBookings(duesBookings, duesFinancials) === 20000 + 16000, "dashboard dues = Active bookings' charge - paid, incl. never-paid (36000)");
 assert(sumMaintenanceOut(maintenance) === 2000, "maint out should be 2000");
 assert(sumPayoutsOut(payouts) === 3000, "payouts out should be 3000");
 assert(operatingNet(financials, maintenance) === 13000, "operating net 13000");

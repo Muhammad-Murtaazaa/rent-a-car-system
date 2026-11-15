@@ -232,7 +232,7 @@ export default function InvoicesLettersView({
     const num = clean.startsWith("0") ? "92" + clean.substring(1) : clean;
     const brand = branding?.name || "Rent A Car Management System";
     const lines = (inv.vehicle_items || []).map(v => `• ${v.name} (${v.period}): PKR ${Number(v.amount).toLocaleString()}`).join("\n");
-    const isSettlement = inv.invoice_mode === "settlement" || (inv.expense_items || []).length > 0;
+    const isSettlement = inv.invoice_mode ? inv.invoice_mode === "settlement" : (inv.expense_items || []).length > 0;
     const text =
       `*VEHICLES INVOICE #${inv.invoice_number || inv.id}* - ${brand}\n` +
       `To: ${inv.invoice_to}${inv.period_label ? ` (${inv.period_label})` : ""}\n\n` +
@@ -358,7 +358,7 @@ export default function InvoicesLettersView({
                       </td>
                     </tr>
                   ) : filteredInvoices.map(inv => {
-                    const isSettlement = inv.invoice_mode === "settlement" || (inv.expense_items || []).length > 0;
+                    const isSettlement = inv.invoice_mode ? inv.invoice_mode === "settlement" : (inv.expense_items || []).length > 0;
                     return (
                       <tr key={inv.id} className="hover:bg-[var(--tr-hover)]/30">
                         <td className="p-4 font-mono font-bold text-[var(--accent-color)]">

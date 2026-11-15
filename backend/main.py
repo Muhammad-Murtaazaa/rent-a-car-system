@@ -22,6 +22,8 @@ from slowapi.errors import RateLimitExceeded
 import boto3
 from botocore.exceptions import NoCredentialsError
 
+from pydantic import ValidationError
+
 from backend import models, schemas, crud, auth
 from backend.database import engine, get_db
 from backend.auth import get_tenant_context, create_access_token, verify_password, get_password_hash, require_super_admin, SUPER_ADMIN_PASSWORD
@@ -29,7 +31,7 @@ from backend.auth import get_tenant_context, create_access_token, verify_passwor
 # Create the tables
 models.Base.metadata.create_all(bind=engine)
 
-# ponytail: SQLite has no Alembic â€” add missing columns on boot. Switch to migrations if schema churn grows.
+# ponytail: SQLite has no Alembic — add missing columns on boot. Switch to migrations if schema churn grows.
 def ensure_sqlite_columns():
     from sqlalchemy import inspect
     is_sqlite = str(engine.url).startswith("sqlite")
@@ -229,14 +231,27 @@ app.mount("/uploads", StaticFiles(directory="app_data/documents"), name="uploads
 
 # --- Automated Backup System ---
 def run_db_backup():
-    """Copy the database file with a timestamp into the backups folder (if SQLite)."""
+    """Snapshot the database into the backups folder (if SQLite).
+
+    Uses SQLite's online backup API instead of copying the raw file: in WAL
+    mode the newest committed transactions live in the -wal file, so a plain
+    file copy silently produced backups missing recent data (and could copy
+    a torn state mid-write). The backup API produces a consistent snapshot
+    including everything committed so far.
+    """
     db_source = "app_data/car_rental.db"
     if not os.path.exists(db_source):
         return
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_dest = f"app_data/backups/car_rental_backup_{timestamp}.db"
     try:
-        shutil.copy2(db_source, backup_dest)
+        import sqlite3
+        src = sqlite3.connect(db_source)
+        dst = sqlite3.connect(backup_dest)
+        with dst:
+            src.backup(dst)
+        dst.close()
+        src.close()
         print(f"[Backup] Successfully created database backup: {backup_dest}")
     except Exception as e:
         print(f"[Backup] Failed to backup database: {str(e)}")
@@ -355,6 +370,26 @@ def upload_file_securely(file: UploadFile) -> str:
     file.file.seek(0)
     if size > max_size:
         raise HTTPException(status_code=400, detail="File size exceeds the 5MB limit.")
+    if size == 0:
+        raise HTTPException(status_code=400, detail="File is empty.")
+
+    # The declared Content-Type is client-controlled and was trusted as-is:
+    # any bytes could be stored under an image/PDF name. Sniff the magic
+    # bytes and require them to match the declared type.
+    head = file.file.read(12)
+    file.file.seek(0)
+    def _sniff(b: bytes):
+        if b.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "image/png"
+        if b.startswith(b"\xff\xd8\xff"):
+            return "image/jpeg"
+        if b.startswith(b"%PDF"):
+            return "application/pdf"
+        if b[:4] == b"RIFF" and b[8:12] == b"WEBP":
+            return "image/webp"
+        return None
+    if _sniff(head) != file.content_type:
+        raise HTTPException(status_code=400, detail="File content does not match its declared type.")
 
     # Sanitize and rename
     ext = os.path.splitext(file.filename)[1]
@@ -524,6 +559,7 @@ def get_current_user_profile(
     return {
         "tenant_id": t_id,
         "role": role,
+        "username": tenant_context.get("username"),
         "tenant": {
             "id": tenant.id if tenant else t_id,
             "name": tenant.name if tenant else "Rent A Car System",
@@ -611,7 +647,7 @@ def get_dashboard_alerts(db: Session = Depends(get_db), tenant_context: dict = D
         alerts.append({
             "type": "overdue",
             "severity": "red",
-            "title": f"Late Return: {b.customer.full_name if b.customer else 'Customer'} â€” Booking #{b.id}",
+            "title": f"Late Return: {b.customer.full_name if b.customer else 'Customer'} — Booking #{b.id}",
             "message": f"Expected return was {b.expected_end_datetime.strftime('%Y-%m-%d %H:%M')}. Overdue by ~{hours_late}h. Vehicle: {b.car.make_model if b.car else 'N/A'} ({b.car.plate_number if b.car else ''}).",
             "booking_id": b.id,
             "car_id": b.car_id
@@ -665,7 +701,7 @@ def get_dashboard_alerts(db: Session = Depends(get_db), tenant_context: dict = D
 
 # --- Cars Endpoints ---
 @app.get("/api/cars", response_model=List[schemas.Car])
-def read_cars(skip: int = 0, limit: int = 10000, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+def read_cars(skip: int = Query(0, ge=0), limit: int = Query(10000, ge=1, le=10000), db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
     return crud.get_cars(db, tenant_id=tenant_context["tenant_id"], skip=skip, limit=limit)
 
 @app.get("/api/cars/{car_id}", response_model=schemas.Car)
@@ -899,7 +935,7 @@ def upload_car_image(file: UploadFile = File(...), tenant_context: dict = Depend
 
 # --- Customers Endpoints ---
 @app.get("/api/customers", response_model=List[schemas.Customer])
-def read_customers(skip: int = 0, limit: int = 10000, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+def read_customers(skip: int = Query(0, ge=0), limit: int = Query(10000, ge=1, le=10000), db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
     return crud.get_customers(db, tenant_id=tenant_context["tenant_id"], skip=skip, limit=limit)
 
 @app.get("/api/customers/lookup/{cnic}", response_model=schemas.Customer)
@@ -975,7 +1011,11 @@ def create_customer(
         except Exception:
             parsed_extra_docs = []
 
-    customer_schema = schemas.CustomerCreate(
+    # The schema is constructed inside the handler (the endpoint takes form
+    # fields), so a pydantic ValidationError here would escape as a 500.
+    # Convert it to the 422 the client should have received.
+    try:
+        customer_schema = schemas.CustomerCreate(
         full_name=full_name,
         phone_primary=phone_primary,
         phone_secondary=phone_secondary or None,
@@ -998,7 +1038,10 @@ def create_customer(
         guarantor2_address=guarantor2_address or None,
         guarantee_details=guarantee_details or None,
         extra_documents=parsed_extra_docs,
-    )
+        )
+    except ValidationError as e:
+        errs = e.errors()
+        raise HTTPException(status_code=422, detail=str(errs[0]["msg"]) if errs else "Invalid customer data")
     return crud.create_customer(db=db, customer=customer_schema, tenant_id=tenant_id)
 
 @app.put("/api/customers/{customer_id}", response_model=schemas.Customer)
@@ -1079,7 +1122,12 @@ def update_customer(
     if license_front:
         update_data["license_front_path"] = upload_file_securely(license_front)
 
-    updated = crud.update_customer(db, customer_id, schemas.CustomerUpdate(**update_data), tenant_id)
+    try:
+        update_schema = schemas.CustomerUpdate(**update_data)
+    except ValidationError as e:
+        errs = e.errors()
+        raise HTTPException(status_code=422, detail=str(errs[0]["msg"]) if errs else "Invalid customer data")
+    updated = crud.update_customer(db, customer_id, update_schema, tenant_id)
     return updated
 
 @app.delete("/api/customers/{customer_id}")
@@ -1092,7 +1140,7 @@ def delete_customer(customer_id: int, db: Session = Depends(get_db), tenant_cont
 
 # --- Bookings Endpoints ---
 @app.get("/api/bookings", response_model=List[schemas.Booking])
-def read_bookings(skip: int = 0, limit: int = 10000, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+def read_bookings(skip: int = Query(0, ge=0), limit: int = Query(10000, ge=1, le=10000), db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
     return crud.get_bookings(db, tenant_id=tenant_context["tenant_id"], skip=skip, limit=limit)
 
 @app.get("/api/bookings/{booking_id}/financials", response_model=List[schemas.Financial])
@@ -1292,7 +1340,7 @@ def update_booking(booking_id: int, booking_update: schemas.BookingUpdate, db: S
 
 # --- Financials Endpoints ---
 @app.get("/api/financials", response_model=List[schemas.Financial])
-def read_financials(skip: int = 0, limit: int = 10000, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+def read_financials(skip: int = Query(0, ge=0), limit: int = Query(10000, ge=1, le=10000), db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
     return crud.get_financials(db, tenant_id=tenant_context["tenant_id"], skip=skip, limit=limit)
 
 @app.post("/api/financials", response_model=schemas.Financial)
@@ -1306,7 +1354,7 @@ def create_financial(financial: schemas.FinancialCreate, db: Session = Depends(g
 
 # --- Maintenance Logs Endpoints ---
 @app.get("/api/maintenance", response_model=List[schemas.MaintenanceLog])
-def read_maintenance(skip: int = 0, limit: int = 10000, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+def read_maintenance(skip: int = Query(0, ge=0), limit: int = Query(10000, ge=1, le=10000), db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
     return crud.get_maintenance_logs(db, tenant_id=tenant_context["tenant_id"], skip=skip, limit=limit)
 
 @app.post("/api/maintenance", response_model=schemas.MaintenanceLog)
@@ -1316,7 +1364,7 @@ def create_maintenance(log: schemas.MaintenanceLogCreate, db: Session = Depends(
 
 # --- Blacklist Endpoints ---
 @app.get("/api/blacklist", response_model=List[schemas.Blacklist])
-def read_blacklist(skip: int = 0, limit: int = 10000, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+def read_blacklist(skip: int = Query(0, ge=0), limit: int = Query(10000, ge=1, le=10000), db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
     return crud.get_blacklist(db, tenant_id=tenant_context["tenant_id"], skip=skip, limit=limit)
 
 @app.get("/api/blacklist/lookup/{cnic}", response_model=schemas.Blacklist)
@@ -1336,7 +1384,9 @@ def add_to_blacklist(blacklist: schemas.BlacklistCreate, db: Session = Depends(g
 
 @app.delete("/api/blacklist/{cnic}")
 def remove_from_blacklist(cnic: str, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
-    crud.remove_from_blacklist(db, cnic_number=cnic, tenant_id=tenant_context["tenant_id"])
+    removed = crud.remove_from_blacklist(db, cnic_number=cnic, tenant_id=tenant_context["tenant_id"])
+    if not removed:
+        raise HTTPException(status_code=404, detail="CNIC is not blacklisted")
     return {"status": "success", "message": f"CNIC {cnic} removed from blacklist"}
 
 
@@ -1486,14 +1536,20 @@ def remove_tenant(
     # login users were removed, so the tenant's cars/bookings/customers stayed
     # behind orphaned - and if the same subdomain was ever re-provisioned, the
     # NEW agency would silently inherit the OLD agency's data.
+    # Order matters (FK constraints): Receipt/Financial/BookedCar reference
+    # Booking; Booking/Lead/Quotation/MaintenanceLog reference Car; Car
+    # references Investor/Shareholder. The previous order deleted Booking
+    # before Receipt and Investor/Shareholder before Car, so deleting a
+    # tenant whose receipts were linked to bookings (or whose cars were
+    # investor-owned) failed with a FOREIGN KEY error and deleted nothing.
     tenant_models_children_first = [
-        models.BookedCar, models.Financial, models.InvestorPayout,
-        models.ShareholderPayout, models.EmployeePayment, models.Booking,
-        models.MaintenanceLog, models.Receipt, models.VehicleInvoice,
-        models.OfficialLetter, models.Quotation, models.Lead,
+        models.BookedCar, models.Financial, models.Receipt,
+        models.InvestorPayout, models.ShareholderPayout, models.EmployeePayment,
+        models.Booking, models.MaintenanceLog, models.Lead, models.Quotation,
+        models.VehicleInvoice, models.OfficialLetter,
         models.SupplierDeal, models.PartnerAgency, models.ChauffeurDriver,
-        models.Employee, models.Investor, models.Shareholder,
-        models.Customer, models.Car, models.Blacklist,
+        models.Employee, models.Customer, models.Car,
+        models.Investor, models.Shareholder, models.Blacklist,
         models.DocumentCounter, models.TenantUser,
     ]
     for model in tenant_models_children_first:
@@ -1513,6 +1569,11 @@ def reset_tenant_password(
     new_password = payload.get("new_password")
     if not new_password:
         raise HTTPException(status_code=400, detail="New password is required")
+    # Resetting a password for a tenant that does not exist used to create
+    # an orphan user row; when the tenant was provisioned later, its chosen
+    # admin password was silently ignored in favour of the orphan's.
+    if not crud.get_tenant(db, tenant_id):
+        raise HTTPException(status_code=404, detail="Tenant not found")
     user = db.query(models.TenantUser).filter(models.TenantUser.tenant_id == tenant_id).first()
     if not user:
         user = models.TenantUser(
@@ -1540,6 +1601,10 @@ def extend_tenant_trial(
     db_tenant = crud.get_tenant(db, tenant_id)
     if not db_tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
+    # Extending a "trial" on a paying tenant silently rewrote its plan to a
+    # trial plan; only tenants actually on a trial can be extended.
+    if not ((db_tenant.plan_type or "").startswith("trial") or db_tenant.subscription_status == "trialing"):
+        raise HTTPException(status_code=400, detail="Tenant is not on a trial plan")
     base_date = db_tenant.trial_ends_at if (db_tenant.trial_ends_at and db_tenant.trial_ends_at >= date.today()) else date.today()
     db_tenant.plan_type = f"trial_{days}d"
     db_tenant.subscription_status = "trialing"
@@ -1573,12 +1638,33 @@ def get_saas_stats(
 
 @app.get("/api/tenant/branding")
 def get_tenant_branding(
-    db: Session = Depends(get_db), 
+    db: Session = Depends(get_db),
     x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
     x_forwarded_host: Optional[str] = Header(None, alias="X-Forwarded-Host"),
-    host: Optional[str] = Header(None)
+    host: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None)
 ):
-    tenant_id = auth.resolve_tenant_id_from_request(x_tenant_id, x_forwarded_host, host)
+    # An authenticated caller gets THEIR tenant's branding (the PUT endpoint
+    # is JWT-based; the GET used to ignore the token entirely and fall back
+    # to header/host resolution, returning the default tenant's branding to
+    # logged-in users on non-subdomain setups). Unauthenticated calls (the
+    # pre-login gate) still resolve from headers/host as before.
+    tenant_id = None
+    if authorization and authorization.lower().startswith("bearer "):
+        try:
+            payload = auth.jwt.decode(
+                authorization.split(" ", 1)[1].strip(),
+                auth.SECRET_KEY,
+                algorithms=[auth.ALGORITHM],
+                options={"require_exp": True},
+            )
+            tenant_id = payload.get("tenant_id")
+            if tenant_id == "system":
+                tenant_id = "default"
+        except Exception:
+            tenant_id = None
+    if not tenant_id:
+        tenant_id = auth.resolve_tenant_id_from_request(x_tenant_id, x_forwarded_host, host)
     db_tenant = crud.get_tenant(db, tenant_id)
     all_default_flags = [
         "dashboard", "fleet", "customers", "leads", "quotations", "bookings",
@@ -1673,8 +1759,8 @@ def upload_tenant_logo(
 @app.get("/api/investors", response_model=List[schemas.InvestorFinancialSummary])
 @app.get("/api/investors/", response_model=List[schemas.InvestorFinancialSummary])
 def list_investors(
-    skip: int = 0,
-    limit: int = 10000,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10000, ge=1, le=10000),
     db: Session = Depends(get_db),
     tenant_context: dict = Depends(get_tenant_context)
 ):
@@ -1740,6 +1826,8 @@ def list_investor_payouts(
     tenant_context: dict = Depends(get_tenant_context)
 ):
     tenant_id = tenant_context["tenant_id"]
+    if not crud.get_investor(db, investor_id=investor_id, tenant_id=tenant_id):
+        raise HTTPException(status_code=404, detail="Investor not found")
     return crud.get_investor_payouts(db, investor_id=investor_id, tenant_id=tenant_id)
 
 @app.post("/api/investors/{investor_id}/payouts", response_model=schemas.InvestorPayout)
@@ -1754,6 +1842,12 @@ def create_investor_payout(
     if not db_investor:
         raise HTTPException(status_code=404, detail="Investor not found")
 
+    # Paying out more than the accrued balance drove "balance due" negative;
+    # reject over-payment like any other money-out validation in the app.
+    summary = crud.get_investor_financial_summary(db, investor_id=investor_id, tenant_id=tenant_id)
+    if summary and payout.amount > summary.payout_balance_due:
+        raise HTTPException(status_code=400, detail=f"Payout exceeds balance due ({summary.payout_balance_due})")
+
     payout_create = schemas.InvestorPayoutCreate(**payout.dict(), investor_id=investor_id)
     return crud.create_investor_payout(db, payout=payout_create, tenant_id=tenant_id)
 
@@ -1762,8 +1856,8 @@ def create_investor_payout(
 @app.get("/api/shareholders", response_model=List[schemas.ShareholderFinancialSummary])
 @app.get("/api/shareholders/", response_model=List[schemas.ShareholderFinancialSummary])
 def list_shareholders(
-    skip: int = 0,
-    limit: int = 10000,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10000, ge=1, le=10000),
     db: Session = Depends(get_db),
     tenant_context: dict = Depends(get_tenant_context)
 ):
@@ -1829,6 +1923,8 @@ def list_shareholder_payouts(
     tenant_context: dict = Depends(get_tenant_context)
 ):
     tenant_id = tenant_context["tenant_id"]
+    if not crud.get_shareholder(db, shareholder_id=shareholder_id, tenant_id=tenant_id):
+        raise HTTPException(status_code=404, detail="Shareholder not found")
     return crud.get_shareholder_payouts(db, shareholder_id=shareholder_id, tenant_id=tenant_id)
 
 @app.post("/api/shareholders/{shareholder_id}/payouts", response_model=schemas.ShareholderPayout)
@@ -1843,13 +1939,17 @@ def create_shareholder_payout(
     if not db_shareholder:
         raise HTTPException(status_code=404, detail="Shareholder not found")
 
+    summary = crud.get_shareholder_financial_summary(db, shareholder_id=shareholder_id, tenant_id=tenant_id)
+    if summary and payout.amount > summary.payout_balance_due:
+        raise HTTPException(status_code=400, detail=f"Payout exceeds balance due ({summary.payout_balance_due})")
+
     payout_create = schemas.ShareholderPayoutCreate(**payout.dict(), shareholder_id=shareholder_id)
     return crud.create_shareholder_payout(db, payout=payout_create, tenant_id=tenant_id)
 
 
 # --- Employees & Payroll Endpoints ---
 @app.get("/api/employees", response_model=List[schemas.Employee])
-def list_employees(skip: int = 0, limit: int = 1000, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+def list_employees(skip: int = Query(0, ge=0), limit: int = Query(1000, ge=1, le=10000), db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
     return crud.get_employees(db, tenant_id=tenant_context["tenant_id"], skip=skip, limit=limit)
 
 @app.post("/api/employees", response_model=schemas.Employee)
@@ -1881,7 +1981,7 @@ def create_employee_payment(employee_id: int, payment: schemas.EmployeePaymentCr
 
 # --- Customer Leads CRM Endpoints ---
 @app.get("/api/leads", response_model=List[schemas.Lead])
-def list_leads(skip: int = 0, limit: int = 1000, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+def list_leads(skip: int = Query(0, ge=0), limit: int = Query(1000, ge=1, le=10000), db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
     return crud.get_leads(db, tenant_id=tenant_context["tenant_id"], skip=skip, limit=limit)
 
 @app.post("/api/leads", response_model=schemas.Lead)
@@ -1905,7 +2005,7 @@ def delete_lead(lead_id: int, db: Session = Depends(get_db), tenant_context: dic
 
 # --- Invoice Quotations Endpoints ---
 @app.get("/api/quotations", response_model=List[schemas.Quotation])
-def list_quotations(skip: int = 0, limit: int = 1000, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+def list_quotations(skip: int = Query(0, ge=0), limit: int = Query(1000, ge=1, le=10000), db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
     return crud.get_quotations(db, tenant_id=tenant_context["tenant_id"], skip=skip, limit=limit)
 
 @app.post("/api/quotations", response_model=schemas.Quotation)
@@ -1929,7 +2029,7 @@ def delete_quotation(quotation_id: int, db: Session = Depends(get_db), tenant_co
 
 # --- Receipts Endpoints ---
 @app.get("/api/receipts", response_model=List[schemas.Receipt])
-def list_receipts(skip: int = 0, limit: int = 1000, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+def list_receipts(skip: int = Query(0, ge=0), limit: int = Query(1000, ge=1, le=10000), db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
     return crud.get_receipts(db, tenant_id=tenant_context["tenant_id"], skip=skip, limit=limit)
 
 @app.post("/api/receipts", response_model=schemas.Receipt)
@@ -1946,7 +2046,7 @@ def delete_receipt(receipt_id: int, db: Session = Depends(get_db), tenant_contex
 
 # --- Vehicles Invoices (Multi-Vehicle Client Billing & Owner Settlement) ---
 @app.get("/api/vehicle-invoices", response_model=List[schemas.VehicleInvoice])
-def list_vehicle_invoices(skip: int = 0, limit: int = 1000, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+def list_vehicle_invoices(skip: int = Query(0, ge=0), limit: int = Query(1000, ge=1, le=10000), db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
     return crud.get_vehicle_invoices(db, tenant_id=tenant_context["tenant_id"], skip=skip, limit=limit)
 
 @app.post("/api/vehicle-invoices", response_model=schemas.VehicleInvoice)
@@ -1970,7 +2070,7 @@ def delete_vehicle_invoice(invoice_id: int, db: Session = Depends(get_db), tenan
 
 # --- Official Letterhead Documents ---
 @app.get("/api/letters", response_model=List[schemas.OfficialLetter])
-def list_official_letters(skip: int = 0, limit: int = 1000, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+def list_official_letters(skip: int = Query(0, ge=0), limit: int = Query(1000, ge=1, le=10000), db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
     return crud.get_official_letters(db, tenant_id=tenant_context["tenant_id"], skip=skip, limit=limit)
 
 @app.post("/api/letters", response_model=schemas.OfficialLetter)
@@ -1987,7 +2087,7 @@ def delete_official_letter(letter_id: int, db: Session = Depends(get_db), tenant
 
 # --- Supplier Deals (Sublet / Sourcing) Endpoints ---
 @app.get("/api/supplier-deals", response_model=List[schemas.SupplierDeal])
-def list_supplier_deals(skip: int = 0, limit: int = 1000, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+def list_supplier_deals(skip: int = Query(0, ge=0), limit: int = Query(1000, ge=1, le=10000), db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
     return crud.get_supplier_deals(db, tenant_id=tenant_context["tenant_id"], skip=skip, limit=limit)
 
 @app.post("/api/supplier-deals", response_model=schemas.SupplierDeal)

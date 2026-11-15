@@ -21,6 +21,7 @@ import { jsPDF } from "jspdf";
 import {
   sumCashIn,
   sumOutstanding,
+  sumOutstandingFromBookings,
   sumMaintenanceOut,
   sumPayoutsOut,
   operatingNet,
@@ -252,7 +253,11 @@ export default function App() {
     return () => document.body.classList.remove("menu-open");
   }, [mobileMenuOpen]);
 
-  // Load Tenant Branding configuration dynamically
+  // Load Tenant Branding configuration dynamically. Runs on mount (pre-login,
+  // resolved from the host/subdomain) AND again once a tenant logs in: on the
+  // shared racms domain the pre-login response is the default tenant's
+  // branding, and the sidebar kept showing that tenant's name/theme/flags for
+  // the whole session. With a token the API returns the caller's own tenant.
   useEffect(() => {
     fetch("/api/tenant/branding")
       .then(res => {
@@ -275,7 +280,7 @@ export default function App() {
         }
       })
       .catch(() => {});
-  }, []);
+  }, [tenantToken]);
 
   // High-speed parallel fetch (reduces VPS latency and renders immediately)
   const fetchData = async () => {
@@ -1514,7 +1519,7 @@ function DashboardView({
   const shPortfolio = shareholderPortfolioTotals(shareholders);
 
   const totalRevenue = sumCashIn(financials);
-  const totalBalanceDue = sumOutstanding(financials);
+  const totalBalanceDue = sumOutstandingFromBookings(bookings, financials);
   const totalMaintCost = sumMaintenanceOut(maintenance);
   const totalPayouts = sumPayoutsOut(payouts);
   const opNet = operatingNet(financials, maintenance);
@@ -2086,7 +2091,7 @@ function FleetView({
       setEditingCar(null);
       fetchData();
     } else {
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       alert(data.detail || "Error saving vehicle information.");
     }
   };
@@ -2094,7 +2099,14 @@ function FleetView({
   const handleDelete = async (id) => {
     if (confirm("Are you sure you want to delete this car?")) {
       const res = await fetch(`/api/cars/${id}`, { method: "DELETE" });
-      if (res.ok) fetchData();
+      if (res.ok) {
+        fetchData();
+      } else {
+        // The server refuses (e.g. the car has booking history) with a
+        // helpful message - previously this failure was completely silent.
+        const data = await res.json().catch(() => ({}));
+        alert(data.detail || "Failed to delete vehicle.");
+      }
     }
   };
 
@@ -2733,7 +2745,7 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
       setEditingCustomer(null);
       fetchData();
     } else {
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       alert(data.detail || "Error saving customer.");
     }
   };
@@ -2741,7 +2753,12 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
   const handleDelete = async (id) => {
     if (confirm("Delete customer database record?")) {
       const res = await fetch(`/api/customers/${id}`, { method: "DELETE" });
-      if (res.ok) fetchData();
+      if (res.ok) {
+        fetchData();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert(data.detail || "Failed to delete customer.");
+      }
     }
   };
 
@@ -8655,19 +8672,24 @@ function DataVisualizationsView({ cars, bookings, customers, financials, mainten
   const lineMonths = monthlyCashflow(financials, maintenance, 6, payouts);
   const maxTrendVal = Math.max(...lineMonths.map((m) => Math.max(m.revenue, m.expenses)), 1);
 
-  // Fleet status pie
+  // Fleet status pie. Count each status exactly: the old formula derived
+  // "available" as total - rented - maintenance, which silently counted
+  // Reserved cars as Available and disagreed with the Fleet view.
   const rentedCount = cars.filter((c) => c.status === "Rented").length;
   const maintenanceCount = cars.filter((c) => c.status === "Maintenance").length;
-  const availableCount = Math.max(0, cars.length - rentedCount - maintenanceCount);
+  const availableCount = cars.filter((c) => c.status === "Available").length;
+  const reservedCount = Math.max(0, cars.length - rentedCount - maintenanceCount - availableCount);
 
   const totalCars = cars.length || 1;
   const rentedPct = Math.round((rentedCount / totalCars) * 100);
   const maintPct = Math.round((maintenanceCount / totalCars) * 100);
-  const availPct = Math.max(0, 100 - rentedPct - maintPct);
+  const reservedPct = Math.round((reservedCount / totalCars) * 100);
+  const availPct = Math.max(0, 100 - rentedPct - maintPct - reservedPct);
 
   const p1 = rentedPct;
   const p2 = p1 + availPct;
-  const pieGradient = `conic-gradient(#10b981 0% ${p1}%, #3b82f6 ${p1}% ${p2}%, #f59e0b ${p2}% 100%)`;
+  const p3 = p2 + reservedPct;
+  const pieGradient = `conic-gradient(#10b981 0% ${p1}%, #3b82f6 ${p1}% ${p2}%, #a855f7 ${p2}% ${p3}%, #f59e0b ${p3}% 100%)`;
 
   // Top cars by actual cash collected (payments)
   const carRevenueMap = cashCollectedByCar(financials, bookings);
@@ -8907,6 +8929,16 @@ function DataVisualizationsView({ cars, bookings, customers, financials, mainten
               </div>
               <span className="font-mono font-bold text-amber-700 dark:text-amber-400">{maintenanceCount} ({maintPct}%)</span>
             </div>
+
+            {reservedCount > 0 && (
+              <div className="flex justify-between items-center p-2 rounded-lg bg-purple-500/10 border border-purple-500/20">
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full bg-purple-500" />
+                  <span className="font-bold text-[var(--text-main)]">Reserved</span>
+                </div>
+                <span className="font-mono font-bold text-purple-700 dark:text-purple-400">{reservedCount} ({reservedPct}%)</span>
+              </div>
+            )}
           </div>
         </div>
 

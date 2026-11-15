@@ -64,7 +64,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
 def decode_access_token(token: str) -> Dict:
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], options={"require_exp": True})
         return payload
     except JWTError:
         raise HTTPException(
@@ -105,7 +105,7 @@ def get_tenant_context(
     if credentials:
         token = credentials.credentials
         try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], options={"require_exp": True})
             tenant_id = payload.get("tenant_id")
             role = payload.get("role", "desk_staff")
             if not tenant_id:
@@ -119,7 +119,7 @@ def get_tenant_context(
                     "tenant_id": target_tenant if target_tenant != "system" else "default",
                     "role": "super_admin"
                 }
-            return {"tenant_id": tenant_id, "role": role}
+            return {"tenant_id": tenant_id, "role": role, "username": payload.get("sub")}
         except JWTError:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -167,7 +167,7 @@ def require_super_admin(
     # passwords with no credentials at all, so it has been removed entirely.
     if credentials:
         try:
-            payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+            payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM], options={"require_exp": True})
             if payload.get("role") == "super_admin":
                 return payload
         except JWTError:
