@@ -67,15 +67,25 @@ export default function ReceiptsView({ receipts = [], bookings = [], branding, f
       }
       fetchData();
     } else {
-      const err = await res.json();
+      const err = await res.json().catch(() => ({}));
       alert(err.detail || "Failed to generate receipt.");
     }
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm("Delete this receipt?")) return;
+    const r = receipts.find(x => x.id === id);
+    const posted = r && r.booking_id && (r.receipt_type || "Booking Payment") === "Booking Payment";
+    const msg = posted
+      ? "Delete this receipt? The payment it recorded on the booking will also be removed, and the booking's balance will go back up."
+      : "Delete this receipt?";
+    if (!window.confirm(msg)) return;
     const res = await fetch(`/api/receipts/${id}`, { method: "DELETE" });
-    if (res.ok) fetchData();
+    if (res.ok) {
+      fetchData();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      alert(err.detail || "Failed to delete receipt.");
+    }
   };
 
   const downloadReceiptPDF = (r) => {

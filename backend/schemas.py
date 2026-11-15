@@ -295,6 +295,7 @@ class FinancialCreate(FinancialBase):
 
 class Financial(FinancialBase):
     id: int
+    receipt_id: Optional[int] = None
 
     class Config:
         from_attributes = True

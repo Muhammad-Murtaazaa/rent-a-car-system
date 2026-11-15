@@ -1,7 +1,8 @@
 from sqlalchemy.orm import Session, joinedload
 from backend import models, schemas
-from datetime import datetime, date
+from datetime import datetime, date, time as _time
 from fastapi import HTTPException, status
+import math as _math
 import re as _re
 
 def next_document_number(db: Session, model, number_field: str, tenant_id: str, prefix: str) -> str:
@@ -1071,8 +1072,28 @@ def get_receipts(db: Session, tenant_id: str, skip: int = 0, limit: int = 1000):
 def get_receipt(db: Session, receipt_id: int, tenant_id: str):
     return db.query(models.Receipt).filter(models.Receipt.id == receipt_id, models.Receipt.tenant_id == tenant_id).first()
 
+def booking_charge_estimate(db: Session, booking) -> float:
+    """Server-side mirror of the frontend's estimatedBookingCharge
+    (financeUtils.js) — the same total the tenant sees as the booking's
+    charge, so receipt-vs-balance checks agree with the UI."""
+    start, end = booking.start_datetime, booking.expected_end_datetime
+    if not start or not end:
+        return 0.0
+    auto_days = max(1, _math.ceil(abs((end - start).total_seconds()) / 86400))
+    days = booking.billable_days if booking.billable_days and booking.billable_days > 0 else auto_days
+    total = days * float(booking.daily_rate or 0)
+    if booking.is_chauffeur_driven:
+        total += days * float(booking.chauffeur_daily_wage or 0)
+    total += float(booking.late_penalty_charge or 0)
+    total += float(booking.car_wash_charge or 0)
+    for bc in (booking.booked_cars or []):
+        total += float(bc.extra_fuel_charge or 0) + float(bc.structural_damage_charge or 0)
+    return float(total)
+
+
 def create_receipt(db: Session, receipt: schemas.ReceiptCreate, tenant_id: str):
     data = receipt.dict()
+    booking = None
     if data.get("booking_id"):
         booking = db.query(models.Booking).filter(
             models.Booking.id == data["booking_id"],
@@ -1082,10 +1103,41 @@ def create_receipt(db: Session, receipt: schemas.ReceiptCreate, tenant_id: str):
             # Previously this fell through to the insert and crashed with a
             # 500 foreign-key error (and allowed cross-tenant linkage).
             raise HTTPException(status_code=404, detail="Linked booking not found for this agency.")
+    # A "Booking Payment" receipt against a booking IS the money-in event
+    # for that booking (tenants work receipt-first), so it also posts to
+    # the booking's payment ledger — one trail, no double bookkeeping.
+    # Other receipt types (Security Deposit, Deposit Refund, Other Income)
+    # are not rent payments and never post. The receipt may not exceed
+    # the booking's remaining balance.
+    posts_payment = bool(booking) and (data.get("receipt_type") or "Booking Payment") == "Booking Payment"
+    remaining = None
+    if posts_payment:
+        charge = booking_charge_estimate(db, booking)
+        remaining = charge - sum_paid_for_booking(db, booking.id, tenant_id)
+        if float(data["amount"]) > remaining + 0.005:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Receipt amount PKR {float(data['amount']):,.0f} exceeds the remaining balance "
+                    f"on this booking (PKR {max(0.0, remaining):,.0f} remaining of PKR {charge:,.0f}). "
+                    "Lower the receipt amount or adjust the booking charges first."
+                ),
+            )
     if not data.get("receipt_number"):
         data["receipt_number"] = next_document_number(db, models.Receipt, "receipt_number", tenant_id, "RCP")
     db_r = models.Receipt(**data, tenant_id=tenant_id)
     db.add(db_r)
+    db.flush()  # assigns db_r.id inside the same transaction
+    if posts_payment:
+        db.add(models.Financial(
+            tenant_id=tenant_id,
+            booking_id=booking.id,
+            receipt_id=db_r.id,
+            amount_paid=float(data["amount"]),
+            payment_datetime=datetime.combine(db_r.receipt_date, _time(12, 0)),
+            payment_method=db_r.payment_method or "Cash",
+            balance_due=max(0.0, remaining - float(data["amount"])),
+        ))
     db.commit()
     db.refresh(db_r)
     return db_r
@@ -1093,6 +1145,13 @@ def create_receipt(db: Session, receipt: schemas.ReceiptCreate, tenant_id: str):
 def delete_receipt(db: Session, receipt_id: int, tenant_id: str):
     db_r = get_receipt(db, receipt_id, tenant_id)
     if db_r:
+        # Reverse the auto-posted booking payment (if any) in the same
+        # transaction, so the booking balance restores itself and the two
+        # trails can never drift apart.
+        db.query(models.Financial).filter(
+            models.Financial.receipt_id == db_r.id,
+            models.Financial.tenant_id == tenant_id,
+        ).delete(synchronize_session=False)
         db.delete(db_r)
         db.commit()
     return db_r

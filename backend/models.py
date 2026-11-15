@@ -170,6 +170,10 @@ class Financial(Base):
     payment_datetime = Column(DateTime, nullable=False)
     payment_method = Column(String, nullable=False)  # Cash, Bank Transfer, EasyPaisa/JazzCash
     balance_due = Column(Float, nullable=False)
+    # Set when this payment was auto-posted by an official receipt
+    # (receipts are the tenant-facing money-in document; deleting the
+    # receipt removes this payment again). NULL for manual payments.
+    receipt_id = Column(Integer, ForeignKey("receipts.id"), nullable=True, index=True)
 
     booking = relationship("Booking", back_populates="financials")
 

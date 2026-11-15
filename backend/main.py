@@ -107,6 +107,9 @@ def ensure_sqlite_columns():
         "quotations": [
             ("items", "JSON"),
         ],
+        "financials": [
+            ("receipt_id", "INTEGER"),
+        ],
     }
     inspector = inspect(engine)
     with engine.begin() as conn:

@@ -4899,7 +4899,7 @@ function BookingsView({
                   <div key={f.id} className="flex justify-between items-center bg-[var(--bg-app)] border border-[var(--border-color)] rounded-lg p-3 text-xs">
                     <div>
                       <p className="font-bold text-[var(--text-main)]">PKR {Number(f.amount_paid).toLocaleString()}</p>
-                      <p className="text-[var(--text-muted)]">{f.payment_method} · {new Date(f.payment_datetime).toLocaleString()}</p>
+                      <p className="text-[var(--text-muted)]">{f.payment_method} · {new Date(f.payment_datetime).toLocaleString()}{f.receipt_id ? " · via Official Receipt" : ""}</p>
                     </div>
                     <span className="text-[10px] font-mono text-[var(--text-muted)]">bal {Number(f.balance_due).toLocaleString()}</span>
                   </div>
