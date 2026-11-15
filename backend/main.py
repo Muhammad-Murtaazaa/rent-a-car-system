@@ -1104,10 +1104,11 @@ def create_quick_event_booking(
     if not customer:
         customer = models.Customer(
             tenant_id=tenant_id,
-            name=payload.client_name.strip(),
+            full_name=payload.client_name.strip(),
             phone_primary=payload.phone.strip(),
             cnic_number=payload.cnic.strip(),
-            address=payload.pickup_location or "N/A"
+            home_address=payload.pickup_location or "N/A",
+            license_number=f"LIC-{payload.cnic.strip()[-6:]}"
         )
         db.add(customer)
         db.flush()
