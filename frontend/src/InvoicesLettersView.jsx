@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { localTodayStr, localDateTimeStr } from "./dateUtils";
 import {
   FileText, Plus, Search, Trash2, X, Download, Send, Edit2,
   MinusCircle, Building2, ScrollText, Receipt, CheckCircle
@@ -20,7 +21,7 @@ export default function InvoicesLettersView({
 
   const [showLetterModal, setShowLetterModal] = useState(false);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localTodayStr();
   const bSettings = branding?.branding_settings || {};
 
   const emptyInvForm = {
@@ -108,9 +109,14 @@ export default function InvoicesLettersView({
   const totalRent = (invForm.vehicle_items || []).reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
   const totalExpense = (invForm.expense_items || []).reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
   const receivedAmt = parseFloat(invForm.received_amount) || 0;
-  const finalBalanceOrPayable = invForm.invoice_mode === "settlement" || (invForm.expense_items || []).length > 0
+  // Settlement: what the agency owes after expenses. Client invoice: rent
+  // minus expenses minus what the client already paid. The old condition
+  // dropped received_amount entirely whenever ANY expense row existed, so a
+  // client who had paid 50,000 of a 100,000 invoice with a 10,000 expense row
+  // was shown a 90,000 balance instead of 40,000.
+  const finalBalanceOrPayable = invForm.invoice_mode === "settlement"
     ? totalRent - totalExpense
-    : totalRent - receivedAmt;
+    : totalRent - totalExpense - receivedAmt;
 
   const addCommissionRow = (pct = 20) => {
     const amt = Math.round(totalRent * (pct / 100));

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { localTodayStr, localDateTimeStr } from "./dateUtils";
 import { UserPlus, Plus, Search, Edit2, Trash2, X, Send, FileText, CheckCircle, Phone, Calendar } from "lucide-react";
 
 export default function LeadsView({ leads = [], cars = [], branding, fetchData, onCreateQuoteFromLead, onConvertLeadToCustomer }) {
@@ -18,7 +19,7 @@ export default function LeadsView({ leads = [], cars = [], branding, fetchData, 
     quoted_amount: 0,
     source: "Phone Call",
     status: "New",
-    follow_up_date: new Date().toISOString().slice(0, 10),
+    follow_up_date: localTodayStr(),
     notes: ""
   };
   const [form, setForm] = useState(emptyForm);

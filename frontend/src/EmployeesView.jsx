@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { localTodayStr, localDateTimeStr } from "./dateUtils";
 import { Users, Plus, Search, Edit2, Trash2, X, Wallet, Phone, Calendar, BadgeCheck } from "lucide-react";
 
 export default function EmployeesView({ employees = [], fetchData }) {
@@ -11,9 +12,9 @@ export default function EmployeesView({ employees = [], fetchData }) {
   const [payTarget, setPayTarget] = useState(null);
   const [payForm, setPayForm] = useState({
     amount: "",
-    payment_date: new Date().toISOString().slice(0, 10),
+    payment_date: localTodayStr(),
     payment_method: "Cash",
-    month_label: new Date().toISOString().slice(0, 7),
+    month_label: localTodayStr().slice(0, 7),
     notes: ""
   });
 
@@ -26,7 +27,7 @@ export default function EmployeesView({ employees = [], fetchData }) {
     license_number: "",
     salary_type: "Monthly",
     salary_amount: 0,
-    joining_date: new Date().toISOString().slice(0, 10),
+    joining_date: localTodayStr(),
     status: "Active",
     notes: ""
   };
@@ -43,7 +44,7 @@ export default function EmployeesView({ employees = [], fetchData }) {
         license_number: editingEmployee.license_number || "",
         salary_type: editingEmployee.salary_type || "Monthly",
         salary_amount: editingEmployee.salary_amount || 0,
-        joining_date: editingEmployee.joining_date ? String(editingEmployee.joining_date).slice(0, 10) : new Date().toISOString().slice(0, 10),
+        joining_date: editingEmployee.joining_date ? String(editingEmployee.joining_date).slice(0, 10) : localTodayStr(),
         status: editingEmployee.status || "Active",
         notes: editingEmployee.notes || ""
       });
@@ -247,9 +248,9 @@ export default function EmployeesView({ employees = [], fetchData }) {
                             setPayTarget(emp);
                             setPayForm({
                               amount: String(emp.salary_amount || ""),
-                              payment_date: new Date().toISOString().slice(0, 10),
+                              payment_date: localTodayStr(),
                               payment_method: "Cash",
-                              month_label: new Date().toISOString().slice(0, 7),
+                              month_label: localTodayStr().slice(0, 7),
                               notes: ""
                             });
                             setShowPayModal(true);

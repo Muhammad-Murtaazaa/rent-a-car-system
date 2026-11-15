@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { localTodayStr, localDateTimeStr } from "./dateUtils";
 import { 
   FileText, Plus, Search, Trash2, X, Download, Send, Edit2, 
   CalendarCheck, MinusCircle, Building2, User, Phone, Mail, 
@@ -20,7 +21,7 @@ export default function QuotationsView({
   const [showModal, setShowModal] = useState(false);
   const [editingQuote, setEditingQuote] = useState(null);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localTodayStr();
   const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
 
   const defaultTerms = branding?.branding_settings?.terms_and_conditions ||
@@ -152,12 +153,18 @@ export default function QuotationsView({
     const method = editingQuote ? "PUT" : "POST";
     const url = editingQuote ? `/api/quotations/${editingQuote.id}` : "/api/quotations";
 
+    const parsedDays = parseInt(form.days, 10) || 1;
     const payload = {
       ...form,
       car_id: form.car_id ? parseInt(form.car_id, 10) : null,
       vehicle_description: descSummary,
-      days: parseInt(form.days, 10) || 1,
-      daily_rate: validItems[0]?.amount || 0,
+      start_date: form.start_date || today,
+      end_date: form.end_date || form.start_date || today,
+      days: parsedDays,
+      // A real per-day rate: total quoted rent spread over the period. The old
+      // value was simply the first line item's TOTAL amount, mislabelled as a
+      // daily rate (and it poisoned booking conversions built from quotes).
+      daily_rate: Math.round((itemsTotal / parsedDays) * 100) / 100,
       discount_amount: discountVal,
       tax_percentage: taxPct,
       total_amount: finalGrandTotal,
@@ -448,6 +455,52 @@ export default function QuotationsView({
                       value={form.customer_phone} 
                       onChange={e => setForm({ ...form, customer_phone: e.target.value })} 
                       className="w-full app-input rounded-xl p-2.5 font-mono" 
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Rental period - previously these were silently stored as
+                  today/today/1 day no matter what the quote actually covered */}
+              <div className="p-4 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-app)]/50 space-y-3">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-sky-500 flex items-center gap-1.5">
+                  <Calendar className="h-3.5 w-3.5" /> Rental Period
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block font-semibold text-[var(--text-muted)] mb-1">Start Date</label>
+                    <input
+                      type="date"
+                      value={form.start_date || ""}
+                      onChange={e => {
+                        const start = e.target.value;
+                        const days = start && form.end_date ? Math.max(1, Math.round((new Date(form.end_date) - new Date(start)) / 86400000) || 1) : form.days;
+                        setForm({ ...form, start_date: start, days });
+                      }}
+                      className="w-full app-input rounded-xl p-2.5 font-medium"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-[var(--text-muted)] mb-1">End Date</label>
+                    <input
+                      type="date"
+                      value={form.end_date || ""}
+                      onChange={e => {
+                        const end = e.target.value;
+                        const days = form.start_date && end ? Math.max(1, Math.round((new Date(end) - new Date(form.start_date)) / 86400000) || 1) : form.days;
+                        setForm({ ...form, end_date: end, days });
+                      }}
+                      className="w-full app-input rounded-xl p-2.5 font-medium"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-[var(--text-muted)] mb-1">Days</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={form.days}
+                      onChange={e => setForm({ ...form, days: e.target.value })}
+                      className="w-full app-input rounded-xl p-2.5 font-medium"
                     />
                   </div>
                 </div>

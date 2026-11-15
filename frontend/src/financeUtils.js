@@ -157,6 +157,16 @@ export function monthlyCashflow(financials, maintenance, months = 6, payouts = [
 }
 
 /** Actual cash collected per car via booking → payment rows */
+/** True when a booking involves the car - as its primary car OR as any of its
+ * booked_cars. Filters that only check booking.car_id silently drop multi-car
+ * bookings from per-car reports and investor/shareholder pages. */
+export function bookingIncludesCar(booking, carId) {
+  if (!booking || carId === null || carId === undefined) return false;
+  if (String(booking.car_id) === String(carId)) return true;
+  return Array.isArray(booking.booked_cars) &&
+    booking.booked_cars.some((bc) => String(bc.car_id) === String(carId));
+}
+
 export function cashCollectedByCar(financials, bookings) {
   const bookingToCars = {};
   for (const b of bookings || []) {
@@ -187,12 +197,16 @@ export function sumPaidForBooking(financials, bookingId) {
     .reduce((acc, f) => acc + (Number(f.amount_paid) || 0), 0);
 }
 
-/** Estimate booking charge from rate × days (no total_cost column on Booking) */
+/** Estimate booking charge from rate × days (no total_cost column on Booking).
+ * MUST stay identical to estimateBookingCharges in App.jsx (contract/list):
+ * days run start -> EXPECTED end (or billable_days when set). The old version
+ * ran to the ACTUAL return time and then also added late_penalty_charge, so a
+ * late return was charged twice in Reports but once on the contract. */
 export function estimatedBookingCharge(booking) {
   const start = parseDate(booking.start_datetime);
-  const end = parseDate(booking.actual_return_datetime || booking.expected_end_datetime);
+  const end = parseDate(booking.expected_end_datetime);
   if (!start || !end) return 0;
-  const ms = end.getTime() - start.getTime();
+  const ms = Math.abs(end.getTime() - start.getTime());
   const autoDays = Math.max(1, Math.ceil(ms / 86400000));
   const days = booking.billable_days && booking.billable_days > 0 ? booking.billable_days : autoDays;
   let total = days * (Number(booking.daily_rate) || 0);

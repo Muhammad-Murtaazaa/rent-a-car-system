@@ -119,6 +119,18 @@ class CustomerUpdate(BaseModel):
     guarantee_details: Optional[str] = None
     extra_documents: Optional[Any] = None
 
+    @field_validator('cnic_number')
+    @classmethod
+    def validate_cnic(cls, v):
+        # Same normalization as CustomerBase: store digits-only so blacklist
+        # checks and duplicate detection work no matter how it was typed.
+        if v is None:
+            return v
+        cleaned = v.replace("-", "").strip()
+        if not cleaned.isdigit() or len(cleaned) != 13:
+            raise ValueError("CNIC number must be exactly a 13-digit string")
+        return cleaned
+
 class Customer(CustomerBase):
     id: int
 
@@ -208,6 +220,16 @@ class QuickEventBookingRequest(BaseModel):
     payment_method: Optional[str] = "Cash"
     security_deposit_amount: Optional[float] = 0.0
     security_deposit_type: Optional[str] = "Cash"
+
+    @field_validator('cnic')
+    @classmethod
+    def validate_cnic(cls, v):
+        # Normalize like CustomerBase so quick-event customers, blacklist rows
+        # and duplicate checks all compare the same digits-only value.
+        cleaned = (v or "").replace("-", "").strip()
+        if not cleaned.isdigit() or len(cleaned) != 13:
+            raise ValueError("CNIC number must be exactly a 13-digit string")
+        return cleaned
 
 class BookingUpdate(BaseModel):
     car_id: Optional[int] = None

@@ -52,21 +52,21 @@ export function getAugmentedHeaders(initHeaders, url = "") {
   return out;
 }
 
-export function handleAuthFailure() {
+export function handleAuthFailure(tokenUsed) {
   if (typeof window === "undefined") return;
-  const isDedicatedHost =
-    window.location.hostname !== "racms.omnysync.com" &&
-    window.location.hostname !== "localhost" &&
-    window.location.hostname !== "127.0.0.1" &&
-    !window.location.hostname.startsWith("13.140.");
-
-  const hasToken = localStorage.getItem("tenant_token");
-  if (hasToken || isDedicatedHost) {
-    console.warn("Tenant session invalid or expired. Resetting session.");
-    localStorage.removeItem("tenant_token");
-    localStorage.removeItem("tenant_user");
-    window.dispatchEvent(new CustomEvent("racms-session-expired"));
-  }
+  // Only end the session when the request that failed carried the token that
+  // is STILL stored. The old version wiped the session on ANY 401 - including
+  // the unauthenticated requests the app fires before login - so a slow
+  // pre-login request landing just after the user signed in deleted the fresh
+  // token, and every later action failed with "Authentication required to
+  // access this agency workspace." even though the user was logged in.
+  if (!tokenUsed) return;
+  const currentToken = localStorage.getItem("tenant_token");
+  if (!currentToken || tokenUsed !== currentToken) return;
+  console.warn("Tenant session invalid or expired. Resetting session.");
+  localStorage.removeItem("tenant_token");
+  localStorage.removeItem("tenant_user");
+  window.dispatchEvent(new CustomEvent("racms-session-expired"));
 }
 
 function openDB() {
@@ -219,6 +219,14 @@ function normalizeCollectionPath(url) {
   return url.split("?")[0].replace(/\/+$/, "");
 }
 
+// The collection a queued POST belongs to in list views. A quick-event booking
+// is created via /api/bookings/quick-event but shows up in GET /api/bookings,
+// so without this mapping offline-created events never appeared in the list.
+function collectionPathFor(url) {
+  const p = normalizeCollectionPath(url);
+  return p.endsWith("/quick-event") ? p.slice(0, -"/quick-event".length) : p;
+}
+
 function makeJsonResponse(data, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
     status: 200,
@@ -230,6 +238,7 @@ export async function syncOfflineQueue() {
   if (isSyncing || !navigator.onLine) return 0;
   isSyncing = true;
   let syncedCount = 0;
+  const failures = [];
 
   try {
     const items = await idbGetAll(OUTBOX_STORE);
@@ -239,24 +248,48 @@ export async function syncOfflineQueue() {
       try {
         const replayHeaders = getAugmentedHeaders(item.headers, item.url);
         if (item.bodyType === "formdata") {
+          // Let the browser set the multipart Content-Type (with boundary),
+          // but DO send Authorization / X-Tenant-ID. This path previously sent
+          // no headers at all, so every queued upload on a tenant workspace
+          // got a 401 and blocked the whole queue forever.
           delete replayHeaders["Content-Type"];
           delete replayHeaders["content-type"];
         }
         const fetchOpts = {
           method: item.method,
-          headers: item.bodyType === "formdata" ? undefined : replayHeaders,
+          headers: replayHeaders,
           body: reconstructBody(item)
         };
         const res = await originalFetch(item.url, fetchOpts);
-        if (res.ok || (res.status >= 400 && res.status < 500 && res.status !== 401)) {
+        if (res.ok) {
           await idbDelete(OUTBOX_STORE, item.id);
-          if (res.ok) syncedCount++;
+          syncedCount++;
+        } else if (res.status === 401) {
+          const auth = replayHeaders["authorization"] || replayHeaders["Authorization"] || "";
+          handleAuthFailure(auth.startsWith("Bearer ") ? auth.slice(7) : null);
+          break;
+        } else if (res.status >= 400 && res.status < 500) {
+          // The server permanently rejected this item (validation, blacklist,
+          // overlap...). The old code silently DELETED it here, so a booking
+          // or payment the user had already seen "saved" simply never existed.
+          // Remove it so it cannot block the queue, but ALWAYS tell the user.
+          let detail = "";
+          try {
+            const body = await res.clone().json();
+            detail = body?.detail || "";
+          } catch {}
+          await idbDelete(OUTBOX_STORE, item.id);
+          failures.push({ url: item.url, method: item.method, status: res.status, detail });
         } else {
           break;
         }
       } catch {
         break;
       }
+    }
+
+    if (failures.length > 0) {
+      window.dispatchEvent(new CustomEvent("racms-sync-failed", { detail: { failures } }));
     }
 
     const remaining = await getPendingSyncCount();
@@ -281,7 +314,7 @@ export function initOfflineSync() {
 
   // Register Service Worker immediately on 1st open and warm all app shell assets
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("/sw.js?v=3", { updateViaCache: "none" }).then(() => {
+    navigator.serviceWorker.register("/sw.js?v=4", { updateViaCache: "none" }).then(() => {
       warmAppShellOnFirstOpen();
     }).catch((err) => {
       console.warn("SW registration skipped:", err);
@@ -310,6 +343,10 @@ export function initOfflineSync() {
 
     const mergedHeaders = getAugmentedHeaders(init.headers || (typeof input !== "string" ? input?.headers : null), urlStr);
     const augmentedInit = { ...init, headers: mergedHeaders };
+    // Remember which token THIS request actually carried, so a 401 can be
+    // attributed to that exact session (see handleAuthFailure).
+    const sentAuth = mergedHeaders["authorization"] || mergedHeaders["Authorization"] || "";
+    const sentToken = sentAuth.startsWith("Bearer ") ? sentAuth.slice(7) : null;
 
     // Don't offline-cache or intercept /api/auth/ calls (e.g. login)
     if (urlStr.includes("/api/auth/")) {
@@ -321,7 +358,7 @@ export function initOfflineSync() {
       try {
         const res = await originalFetch(input, augmentedInit);
         if (res.status === 401) {
-          handleAuthFailure();
+          handleAuthFailure(sentToken);
         }
         if (res.ok) {
           const clone = res.clone();
@@ -338,7 +375,7 @@ export function initOfflineSync() {
         if (Array.isArray(payload)) {
           const outbox = await idbGetAll(OUTBOX_STORE).catch(() => []);
           const pendingCreates = outbox
-            .filter(o => o.method === "POST" && normalizeCollectionPath(o.url) === basePath && o.previewObj)
+            .filter(o => o.method === "POST" && collectionPathFor(o.url) === basePath && o.previewObj)
             .map(o => ({ ...o.previewObj, id: -(o.id || 1), _offline_queued: true }));
           if (pendingCreates.length > 0) {
             payload = [...pendingCreates, ...payload];
@@ -376,7 +413,7 @@ export function initOfflineSync() {
     try {
       const res = await originalFetch(input, augmentedInit);
       if (res.status === 401) {
-        handleAuthFailure();
+        handleAuthFailure(sentToken);
       }
       return res;
     } catch {

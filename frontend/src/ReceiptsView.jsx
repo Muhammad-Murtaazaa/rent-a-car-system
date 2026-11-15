@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { localTodayStr, localDateTimeStr } from "./dateUtils";
 import { jsPDF } from "jspdf";
 import { Receipt, Plus, Search, Trash2, X, Download, Send, Printer } from "lucide-react";
 
@@ -8,7 +9,7 @@ export default function ReceiptsView({ receipts = [], bookings = [], branding, f
   const [showModal, setShowModal] = useState(false);
   const [previewReceipt, setPreviewReceipt] = useState(null);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localTodayStr();
   const emptyForm = {
     receipt_type: "Booking Payment",
     booking_id: "",
@@ -57,7 +58,13 @@ export default function ReceiptsView({ receipts = [], bookings = [], branding, f
       const created = await res.json();
       setShowModal(false);
       setForm(emptyForm);
-      setPreviewReceipt(created);
+      if (created._offline_queued) {
+        // Queued on this device only - it has no real receipt number yet, so
+        // don't open the official preview (it would print a fake receipt).
+        alert("You are offline. The receipt was saved on this device and will be issued automatically when the internet returns.");
+      } else {
+        setPreviewReceipt(created);
+      }
       fetchData();
     } else {
       const err = await res.json();

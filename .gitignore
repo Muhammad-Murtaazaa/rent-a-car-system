@@ -24,3 +24,9 @@ app_data/documents/*
 Thumbs.db
 .vscode/
 .idea/
+
+# Secrets & one-off ops scripts - never commit credentials
+check_vps.py
+test_login.py
+.env
+.env.*

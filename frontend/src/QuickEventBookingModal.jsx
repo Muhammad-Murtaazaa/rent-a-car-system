@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { localTodayStr } from "./dateUtils";
 import { 
   X, Calendar, Clock, MapPin, Fuel, Car, Users, DollarSign, 
   CheckCircle, AlertTriangle, Send, Printer, ShieldAlert, Sparkles, Navigation, FileText, Check
@@ -16,9 +17,9 @@ export default function QuickEventBookingModal({
     client_name: "",
     phone: "",
     cnic: "",
-    event_date: new Date().toISOString().split("T")[0],
+    event_date: localTodayStr(),
     start_time: "09:00",
-    end_date: new Date().toISOString().split("T")[0],
+    end_date: localTodayStr(),
     end_time: "21:00",
     event_timing: "Full Day (9:00 AM - 9:00 PM)",
     pickup_location: "",
@@ -177,6 +178,14 @@ export default function QuickEventBookingModal({
 
       if (res.ok) {
         const data = await res.json();
+        if (data._offline_queued || !data.booking) {
+          // Saved into the offline queue only - there is no server booking
+          // yet, so don't show the confirmation screen (it needs the real
+          // booking) and don't let the user submit a duplicate.
+          setError("You are offline. This booking was saved on this device and will be created automatically when the internet returns. Do not submit it again.");
+          if (onBookingCreated) onBookingCreated();
+          return;
+        }
         setSuccessBooking(data.booking);
         if (onBookingCreated) onBookingCreated();
       } else {

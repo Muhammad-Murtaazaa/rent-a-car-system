@@ -1,5 +1,5 @@
-const STATIC_CACHE = "racms-static-v3";
-const API_CACHE = "racms-api-v3";
+const STATIC_CACHE = "racms-static-v4";
+const API_CACHE = "racms-api-v4";
 const IDB_NAME = "racms-offline-db";
 const IDB_VERSION = 1;
 const OUTBOX_STORE = "outbox";

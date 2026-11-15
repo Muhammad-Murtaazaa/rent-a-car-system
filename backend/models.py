@@ -461,3 +461,16 @@ class ChauffeurDriver(Base):
     specialties = Column(String, nullable=True)
     notes = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+class DocumentCounter(Base):
+    """Per-tenant sequential document numbers that are never re-issued.
+
+    The counter only moves forward, so deleting the latest receipt/quotation/
+    invoice/letter does not make its number available again (the old
+    count/max-based schemes produced duplicate official document numbers).
+    """
+    __tablename__ = "document_counters"
+
+    tenant_id = Column(String, primary_key=True)
+    prefix = Column(String, primary_key=True)  # RCP / QT / INV / LTR
+    last_number = Column(Integer, nullable=False, default=1000)

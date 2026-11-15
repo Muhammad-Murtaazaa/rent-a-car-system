@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { localTodayStr, localDateTimeStr } from "./dateUtils";
 import { 
   Car, Users, Calendar, ShieldAlert, Wrench, Wallet, Plus, 
   Search, Trash2, Edit2, AlertTriangle, CheckCircle, Check, MessageSquare, FileText, Send, X, Clock, PenTool, TrendingUp, DollarSign, Sun, Moon, Briefcase, Menu, Eye, BarChart3, Download, Printer, PieChart, LineChart, UserPlus, Receipt, BadgeCheck, ClipboardList, ScrollText, Settings as SettingsIcon, Wifi, WifiOff, RefreshCw, Smartphone, Handshake, Sparkles, Lock
@@ -38,6 +39,7 @@ import {
   chartAxisTicks,
   sumPaidForBooking,
   estimatedBookingCharge,
+  bookingIncludesCar,
   investorPortfolioTotals,
   shareholderPortfolioTotals,
 } from "./financeUtils";
@@ -187,7 +189,7 @@ export default function App() {
   const [offlineReady, setOfflineReady] = useState(false);
 
   // Business Tool State (Profit Report Date)
-  const [reportDate, setReportDate] = useState(new Date().toISOString().slice(0, 10));
+  const [reportDate, setReportDate] = useState(localTodayStr());
 
   // Advance Receipt Modal state
   const [showAdvanceModal, setShowAdvanceModal] = useState(false);
@@ -277,6 +279,9 @@ export default function App() {
 
   // High-speed parallel fetch (reduces VPS latency and renders immediately)
   const fetchData = async () => {
+    // On a tenant workspace, never fire the data requests before login: they
+    // all come back 401 and used to race with (and wipe) the fresh session.
+    if (isTenantWorkspace && !localStorage.getItem("tenant_token")) return;
     try {
       const q = "limit=10000";
       const [
@@ -328,9 +333,12 @@ export default function App() {
     }
   };
 
+  // Load on mount AND right after a successful gate login (tenantToken changes),
+  // so the workspace is populated immediately instead of staying empty until a
+  // manual refresh.
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [tenantToken]);
 
   // Gentle 30s background sync to keep VPS CPU/RAM minimal
   useEffect(() => {
@@ -358,6 +366,16 @@ export default function App() {
       getPendingSyncCount().then(setPendingSyncCount);
       fetchData();
     };
+    const onSyncFailed = (e) => {
+      const failures = e?.detail?.failures || [];
+      if (!failures.length) return;
+      const first = failures[0];
+      alert(
+        `${failures.length} offline change(s) could NOT be saved on the server and were removed from the sync queue.\n` +
+        `First failure: ${first.method} ${first.url} - ${first.detail || `server error ${first.status}`}\n` +
+        `Please re-enter that record while online.`
+      );
+    };
     const onBeforeInstall = (e) => {
       e.preventDefault();
       setInstallPrompt(e);
@@ -366,6 +384,7 @@ export default function App() {
     window.addEventListener("offline", onOffline);
     window.addEventListener("racms-offline-change", onQueueChange);
     window.addEventListener("racms-sync-complete", onSyncComplete);
+    window.addEventListener("racms-sync-failed", onSyncFailed);
     const onOfflineReady = () => setOfflineReady(true);
     window.addEventListener("racms-offline-ready", onOfflineReady);
     window.addEventListener("beforeinstallprompt", onBeforeInstall);
@@ -374,6 +393,7 @@ export default function App() {
       window.removeEventListener("offline", onOffline);
       window.removeEventListener("racms-offline-change", onQueueChange);
       window.removeEventListener("racms-sync-complete", onSyncComplete);
+      window.removeEventListener("racms-sync-failed", onSyncFailed);
       window.removeEventListener("racms-offline-ready", onOfflineReady);
       window.removeEventListener("beforeinstallprompt", onBeforeInstall);
     };
@@ -562,6 +582,12 @@ export default function App() {
         setUserRole={setUserRole}
         onLoginAsTenant={(tId) => {
           localStorage.setItem("active_tenant_id", tId);
+          // Never carry another tenant's session into this workspace: the
+          // backend takes the tenant from the JWT, so a stale token silently
+          // showed the PREVIOUS tenant's data. Clear it and let the password
+          // gate ask for this tenant's own login.
+          localStorage.removeItem("tenant_token");
+          localStorage.removeItem("tenant_user");
           setUserRole("tenant_admin");
           if (typeof window !== "undefined") {
             window.location.hash = "";
@@ -1043,8 +1069,8 @@ export default function App() {
                 car_id: lead.car_id || "",
                 vehicle_description: lead.interested_vehicle || "",
                 days: lead.duration_days || 1,
-                start_date: lead.pickup_date || new Date().toISOString().slice(0, 10),
-                end_date: lead.pickup_date || new Date().toISOString().slice(0, 10),
+                start_date: lead.pickup_date || localTodayStr(),
+                end_date: lead.pickup_date || localTodayStr(),
                 daily_rate: lead.quoted_amount && lead.duration_days ? Math.round(lead.quoted_amount / lead.duration_days) : 5000
               });
               setActiveTab("quotations");
@@ -2658,7 +2684,7 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
   const handleCnicChange = (e) => {
     const val = e.target.value;
     setForm({...form, cnic_number: val});
-    if (val.replace("-", "").length === 13) {
+    if (val.replace(/-/g, "").length === 13) {
       checkCnicBlacklist(val, setBlacklistWarning);
     } else {
       setBlacklistWarning("");
@@ -3434,8 +3460,8 @@ function BookingsView({
 
   const openEditBooking = (b) => {
     setEditingBookingId(b.id);
-    const startDt = b.start_datetime ? new Date(b.start_datetime).toISOString().slice(0, 16) : "";
-    const endDt = b.expected_end_datetime ? new Date(b.expected_end_datetime).toISOString().slice(0, 16) : "";
+    const startDt = b.start_datetime ? localDateTimeStr(new Date(b.start_datetime)) : "";
+    const endDt = b.expected_end_datetime ? localDateTimeStr(new Date(b.expected_end_datetime)) : "";
     const bookedCars = (b.booked_cars && b.booked_cars.length > 0)
       ? b.booked_cars.map(bc => ({
           car_id: bc.car_id,
@@ -3521,7 +3547,7 @@ function BookingsView({
   const [paymentForm, setPaymentForm] = useState({
     amount_paid: "",
     payment_method: "Cash",
-    payment_datetime: new Date().toISOString().slice(0, 16)
+    payment_datetime: localDateTimeStr()
   });
 
   const openPaymentLedger = async (booking) => {
@@ -3530,7 +3556,7 @@ function BookingsView({
     setPaymentForm({
       amount_paid: "",
       payment_method: "Cash",
-      payment_datetime: new Date().toISOString().slice(0, 16)
+      payment_datetime: localDateTimeStr()
     });
     try {
       const res = await fetch(`/api/bookings/${booking.id}/financials`);
@@ -3574,7 +3600,7 @@ function BookingsView({
       setPaymentForm({
         amount_paid: "",
         payment_method: "Cash",
-        payment_datetime: new Date().toISOString().slice(0, 16)
+        payment_datetime: localDateTimeStr()
       });
       fetchData();
     } else {
@@ -3600,6 +3626,8 @@ function BookingsView({
             car_id: bc.car_id,
             make_model: bc.car?.make_model || "Car",
             plate_number: bc.car?.plate_number || "",
+            start_odometer: bc.start_odometer || 0,
+            fuel_level_on_start: bc.fuel_level_on_start || "Full",
             current_odometer: bc.car?.current_odometer || 0,
             return_odometer: bc.return_odometer || bc.car?.current_odometer || 0,
             fuel_level: bc.fuel_level_on_return || "Full",
@@ -3626,7 +3654,7 @@ function BookingsView({
           }];
 
       setReturnForm({
-        actual_return_datetime: new Date().toISOString().slice(0, 16),
+        actual_return_datetime: localDateTimeStr(),
         notes: "",
         custom_late_penalty: initialOvertimeFee > 0 ? String(initialOvertimeFee) : "",
         late_penalty_waived: false,
@@ -3637,7 +3665,7 @@ function BookingsView({
   }, [showReturnModal, selectedBooking]);
 
   const handleCnicLookup = async () => {
-    const clean = customerLookupCnic.replace("-", "").trim();
+    const clean = customerLookupCnic.replace(/-/g, "").trim();
     if (clean.length !== 13) {
       alert("Please enter exactly 13 digits CNIC");
       return;
@@ -3848,7 +3876,12 @@ function BookingsView({
     const remainingAfterPayments = Math.max(0, totalBill - paidSoFar);
     const depositApplied = Math.min(deposit, remainingAfterPayments);
     const cashToCollect = Math.max(0, remainingAfterPayments - depositApplied);
-    const depositStatus = depositApplied > 0 ? "Withheld" : "Refunded";
+    // A partially-applied deposit is neither fully withheld nor refunded -
+    // the old binary status claimed the WHOLE deposit was withheld even when
+    // only part of it was used and the rest went back to the customer.
+    const depositStatus = depositApplied <= 0
+      ? "Refunded"
+      : (depositApplied >= deposit ? "Withheld" : "Partially Withheld");
 
     const res = await fetch(`/api/bookings/${selectedBooking.id}`, {
       method: "PUT",
@@ -3859,17 +3892,22 @@ function BookingsView({
         security_deposit_status: depositStatus,
         late_penalty_charge: invoice.latePenalty,
         car_wash_charge: invoice.carWashFee,
-        booked_cars: returnForm.booked_cars.map(c => ({
+        booked_cars: returnForm.booked_cars.map((c, idx) => ({
           car_id: c.car_id,
           daily_rate: c.daily_rate || 0, // maintain the actual daily rate
-          start_odometer: c.current_odometer, // maintain
+          // Preserve the handover readings recorded at booking time. The old
+          // code overwrote them at return with the car's CURRENT odometer and
+          // a hardcoded "Full", fabricating the handover record.
+          start_odometer: c.start_odometer ?? c.current_odometer ?? 0,
           return_odometer: parseInt(c.return_odometer, 10) || c.current_odometer || 0,
-          fuel_level_on_start: "Full", // maintain
+          fuel_level_on_start: c.fuel_level_on_start || "Full",
           fuel_level_on_return: c.fuel_level,
           extra_fuel_charge: parseFloat(c.extra_fuel_charge) || 0,
           structural_damage_charge: parseFloat(c.structural_damage_charge) || 0,
           car_wash_charge: parseFloat(c.car_wash_charge) || 0,
-          overtime_charge: invoice.latePenalty,
+          // The late penalty is ONE amount for the whole booking - writing it
+          // onto every car multiplied it by the number of cars in per-car sums.
+          overtime_charge: idx === 0 ? invoice.latePenalty : 0,
           was_given_washed: c.was_given_washed ?? true,
           is_returned_unwashed: !!c.is_returned_unwashed
         }))
@@ -3903,7 +3941,7 @@ function BookingsView({
         body: JSON.stringify({
           booking_id: selectedBooking.id,
           amount_paid: amount,
-          payment_datetime: new Date().toISOString(),
+          payment_datetime: localDateTimeStr(),
           payment_method: method,
           balance_due: 0
         })
@@ -3916,9 +3954,17 @@ function BookingsView({
       return true;
     };
 
-    // Record cash collected + deposit applied so Gross Receipts / investor revenue stay accurate
-    await postPayment(cashToCollect, "Cash");
-    await postPayment(depositApplied, "Security Deposit Applied");
+    // Record cash collected + deposit applied so Gross Receipts / investor revenue stay accurate.
+    // If a payment record fails, the booking is already Completed - say so
+    // loudly and keep the modal open instead of silently closing as if the
+    // money was recorded (the old code ignored postPayment's false return).
+    const cashOk = await postPayment(cashToCollect, "Cash");
+    const depositOk = await postPayment(depositApplied, "Security Deposit Applied");
+    if (!cashOk || !depositOk) {
+      alert("Booking is completed, but a payment record FAILED to save (see the earlier message). Please add the missing payment from the booking's Payments section so the ledger stays correct.");
+      fetchData();
+      return;
+    }
 
     setShowReturnModal(false);
     setSelectedBooking(null);
@@ -4510,7 +4556,7 @@ function BookingsView({
         <CardContent className="p-3 sm:p-6 space-y-4">
           {cars.map(car => {
             const carBookings = bookings
-              .filter(b => b.car_id === car.id && (b.status === "Active" || b.status === "Reserved"))
+              .filter(b => bookingIncludesCar(b, car.id) && (b.status === "Active" || b.status === "Reserved"))
               .sort((a, b) => new Date(a.start_datetime) - new Date(b.start_datetime));
             const activeBooking = carBookings.find(b => b.status === "Active") || carBookings[0];
             
@@ -4977,7 +5023,7 @@ function BookingsView({
                   {(() => {
                     const filtered = customers.filter(c => 
                       c.full_name.toLowerCase().includes(customerQuery.toLowerCase()) ||
-                      c.cnic_number.includes(customerQuery.replace("-", "").trim())
+                      c.cnic_number.includes(customerQuery.replace(/-/g, "").trim())
                     );
                     if (filtered.length === 0) {
                       return <div className="p-2.5 text-xs text-[var(--text-muted)] italic">No customers found</div>;
@@ -5345,6 +5391,7 @@ function BookingsView({
                     <option value="Held">Held</option>
                     <option value="Refunded">Refunded</option>
                     <option value="Withheld">Withheld</option>
+                    <option value="Partially Withheld">Partially Withheld</option>
                   </select>
                 </div>
               </div>
@@ -5831,7 +5878,7 @@ function BookingsView({
 // ==========================================
 function MaintenanceView({ maintenance, cars, fetchData, showModal, setShowModal }) {
   const [form, setForm] = useState({
-    car_id: "", log_type: "Oil Change", cost: 0, execution_date: new Date().toISOString().slice(0, 10),
+    car_id: "", log_type: "Oil Change", cost: 0, execution_date: localTodayStr(),
     next_due_date_or_odometer: "", notes: ""
   });
 
@@ -6043,7 +6090,7 @@ function BlacklistView({ blacklist, fetchData, showModal, setShowModal }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...form,
-        logged_date: new Date().toISOString().slice(0, 10)
+        logged_date: localTodayStr()
       })
     });
 
@@ -6065,7 +6112,7 @@ function BlacklistView({ blacklist, fetchData, showModal, setShowModal }) {
   };
 
   const handleShieldSearch = async () => {
-    const clean = lookupQuery.replace("-", "").trim();
+    const clean = lookupQuery.replace(/-/g, "").trim();
     if (clean.length !== 13) {
       alert("Please input a valid 13-digit CNIC");
       return;
@@ -6249,7 +6296,7 @@ function InvestorsView({ investors, cars, financials = [], bookings = [], mainte
   const [payoutTarget, setPayoutTarget] = useState(null);
   const [payoutForm, setPayoutForm] = useState({
     amount: "",
-    payout_date: new Date().toISOString().slice(0, 10),
+    payout_date: localTodayStr(),
     payment_method: "Bank Transfer",
     notes: ""
   });
@@ -6263,7 +6310,7 @@ function InvestorsView({ investors, cars, financials = [], bookings = [], mainte
     payout_type: "percentage",
     profit_share_percentage: 70,
     fixed_amount: 0,
-    joined_date: new Date().toISOString().slice(0, 10),
+    joined_date: localTodayStr(),
     notes: "",
     assigned_car_ids: []
   });
@@ -6288,7 +6335,7 @@ function InvestorsView({ investors, cars, financials = [], bookings = [], mainte
         payout_type: editingInvestor.payout_type || "percentage",
         profit_share_percentage: editingInvestor.profit_share_percentage || 70,
         fixed_amount: editingInvestor.fixed_amount || 0,
-        joined_date: editingInvestor.joined_date || new Date().toISOString().slice(0, 10),
+        joined_date: editingInvestor.joined_date || localTodayStr(),
         notes: editingInvestor.notes || "",
         assigned_car_ids: editingInvestor.cars ? editingInvestor.cars.map(c => c.id) : []
       });
@@ -6302,7 +6349,7 @@ function InvestorsView({ investors, cars, financials = [], bookings = [], mainte
         payout_type: "percentage",
         profit_share_percentage: 70,
         fixed_amount: 0,
-        joined_date: new Date().toISOString().slice(0, 10),
+        joined_date: localTodayStr(),
         notes: "",
         assigned_car_ids: []
       });
@@ -6315,7 +6362,7 @@ function InvestorsView({ investors, cars, financials = [], bookings = [], mainte
   const investorCarIds = new Set(
     (investors || []).flatMap((inv) => (inv.cars || []).map((c) => c.id))
   );
-  const invBookings = (bookings || []).filter((b) => investorCarIds.has(b.car_id));
+  const invBookings = (bookings || []).filter((b) => investorCarIds.has(b.car_id) || (b.booked_cars || []).some((bc) => investorCarIds.has(bc.car_id)));
   const invBookingIds = new Set(invBookings.map((b) => b.id));
   const invFinancials = (financials || []).filter((f) => invBookingIds.has(f.booking_id));
   const invMaint = (maintenance || []).filter((m) => investorCarIds.has(m.car_id));
@@ -6394,7 +6441,7 @@ function InvestorsView({ investors, cars, financials = [], bookings = [], mainte
         setPayoutTarget(null);
         setPayoutForm({
           amount: "",
-          payout_date: new Date().toISOString().slice(0, 10),
+          payout_date: localTodayStr(),
           payment_method: "Bank Transfer",
           notes: ""
         });
@@ -7089,7 +7136,7 @@ function ShareholdersView({ shareholders, cars, financials = [], bookings = [], 
   const [payoutTarget, setPayoutTarget] = useState(null);
   const [payoutForm, setPayoutForm] = useState({
     amount: "",
-    payout_date: new Date().toISOString().slice(0, 10),
+    payout_date: localTodayStr(),
     payment_method: "Bank Transfer",
     notes: ""
   });
@@ -7103,7 +7150,7 @@ function ShareholdersView({ shareholders, cars, financials = [], bookings = [], 
     payout_type: "percentage",
     share_percentage: 50,
     fixed_amount: 0,
-    joined_date: new Date().toISOString().slice(0, 10),
+    joined_date: localTodayStr(),
     notes: "",
     assigned_car_ids: []
   });
@@ -7128,7 +7175,7 @@ function ShareholdersView({ shareholders, cars, financials = [], bookings = [], 
         payout_type: editingShareholder.payout_type || "percentage",
         share_percentage: editingShareholder.share_percentage || 50,
         fixed_amount: editingShareholder.fixed_amount || 0,
-        joined_date: editingShareholder.joined_date || new Date().toISOString().slice(0, 10),
+        joined_date: editingShareholder.joined_date || localTodayStr(),
         notes: editingShareholder.notes || "",
         assigned_car_ids: editingShareholder.cars ? editingShareholder.cars.map(c => c.id) : []
       });
@@ -7142,7 +7189,7 @@ function ShareholdersView({ shareholders, cars, financials = [], bookings = [], 
         payout_type: "percentage",
         share_percentage: 50,
         fixed_amount: 0,
-        joined_date: new Date().toISOString().slice(0, 10),
+        joined_date: localTodayStr(),
         notes: "",
         assigned_car_ids: []
       });
@@ -7154,7 +7201,7 @@ function ShareholdersView({ shareholders, cars, financials = [], bookings = [], 
   const shareholderCarIds = new Set(
     (shareholders || []).flatMap((sh) => (sh.cars || []).map((c) => c.id))
   );
-  const shBookings = (bookings || []).filter((b) => shareholderCarIds.has(b.car_id));
+  const shBookings = (bookings || []).filter((b) => shareholderCarIds.has(b.car_id) || (b.booked_cars || []).some((bc) => shareholderCarIds.has(bc.car_id)));
   const shBookingIds = new Set(shBookings.map((b) => b.id));
   const shFinancials = (financials || []).filter((f) => shBookingIds.has(f.booking_id));
   const shMaint = (maintenance || []).filter((m) => shareholderCarIds.has(m.car_id));
@@ -7233,7 +7280,7 @@ function ShareholdersView({ shareholders, cars, financials = [], bookings = [], 
         setPayoutTarget(null);
         setPayoutForm({
           amount: "",
-          payout_date: new Date().toISOString().slice(0, 10),
+          payout_date: localTodayStr(),
           payment_method: "Bank Transfer",
           notes: ""
         });
@@ -7969,7 +8016,7 @@ function ReportsView({ cars, bookings, customers, financials, maintenance, inves
 
   const filteredBookings = bookings.filter((b) => {
     const inDate = isWithinDateRange(b.start_datetime);
-    const matchesCar = carFilter === "all" || String(b.car_id) === String(carFilter);
+    const matchesCar = carFilter === "all" || bookingIncludesCar(b, carFilter);
     const matchesStatus = statusFilter === "all" || b.status === statusFilter;
     return inDate && matchesCar && matchesStatus;
   });
@@ -7979,12 +8026,29 @@ function ReportsView({ cars, bookings, customers, financials, maintenance, inves
     return true;
   });
 
+  // Cars have no daily_rate field of their own (rates live on bookings), so
+  // the Reports "Daily Rate" column used to read a nonexistent field and
+  // always showed PKR 0. Use the rate from the car's most recent booking.
+  const lastRateForCar = (carId) => {
+    let rate = 0;
+    let best = null;
+    for (const b of bookings) {
+      const bc = (b.booked_cars || []).find((x) => String(x.car_id) === String(carId));
+      const r = bc ? bc.daily_rate : (String(b.car_id) === String(carId) ? b.daily_rate : null);
+      if (r != null) {
+        const t = new Date(b.start_datetime || 0).getTime() || 0;
+        if (best === null || t >= best) { best = t; rate = Number(r) || 0; }
+      }
+    }
+    return rate;
+  };
+
   // Cash in = payments; cash out = maintenance + investor payouts (same math as dashboard)
   const rangeFinancialsForCar = carFilter === "all"
     ? filteredFinancials
     : filteredFinancials.filter((f) => {
         const b = bookings.find((x) => x.id === f.booking_id);
-        return b && String(b.car_id) === String(carFilter);
+        return b && bookingIncludesCar(b, carFilter);
       });
 
   const totalRevenue = sumCashIn(rangeFinancialsForCar);
@@ -8003,12 +8067,12 @@ function ReportsView({ cars, bookings, customers, financials, maintenance, inves
     if (row.category === "Investor Payout") return false;
     if (row.type === "Cash Out") return String(row.car_id) === String(carFilter);
     const b = bookings.find((x) => x.id === row.booking_id);
-    return b && String(b.car_id) === String(carFilter);
+    return b && bookingIncludesCar(b, carFilter);
   });
 
   const exportCSV = () => {
     let csvRows = [];
-    let filename = `Report_${reportCategory}_${new Date().toISOString().slice(0, 10)}.csv`;
+    let filename = `Report_${reportCategory}_${localTodayStr()}.csv`;
 
     if (reportCategory === "financials") {
       csvRows.push(["Ref", "Date", "Description", "Flow", "Category", "Amount (PKR)"]);
@@ -8044,7 +8108,7 @@ function ReportsView({ cars, bookings, customers, financials, maintenance, inves
           c.id,
           `"${(c.make_model || "").replace(/"/g, '""')}"`,
           c.plate_number || "",
-          c.daily_rate || 0,
+          lastRateForCar(c.id),
           c.status || "Available",
           carCash[c.id] || 0,
         ]);
@@ -8444,13 +8508,13 @@ function ReportsView({ cars, bookings, customers, financials, maintenance, inves
                 {(() => {
                   const carCash = cashCollectedByCar(financials, bookings);
                   return filteredCars.map((c) => {
-                    const cBookings = bookings.filter((b) => b.car_id === c.id).length;
+                    const cBookings = bookings.filter((b) => bookingIncludesCar(b, c.id)).length;
                     return (
                       <tr key={c.id} className="hover:bg-[var(--tr-hover)]">
                         <td className="p-3 font-mono font-bold text-[var(--accent-color)]">#{c.id}</td>
                         <td className="p-3 font-bold">{c.make_model}</td>
                         <td className="p-3 font-mono">{c.plate_number}</td>
-                        <td className="p-3 font-mono">PKR {parseFloat(c.daily_rate || 0).toLocaleString()}</td>
+                        <td className="p-3 font-mono">{lastRateForCar(c.id) > 0 ? `PKR ${lastRateForCar(c.id).toLocaleString()}` : "—"}</td>
                         <td className="p-3 font-mono font-bold">{cBookings}</td>
                         <td className="p-3 font-mono font-bold text-right text-emerald-700 dark:text-emerald-400">
                           PKR {(carCash[c.id] || 0).toLocaleString()}

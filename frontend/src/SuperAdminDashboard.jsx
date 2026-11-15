@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { localTodayStr } from "./dateUtils";
 import {
   Server, Users, BarChart3, Plus, X, Palette, CheckCircle,
   ShieldAlert, Sliders, Clock, Trash2, Power, Sparkles, ExternalLink, Car,
@@ -22,7 +23,7 @@ function calcDaysLeft(trialEndsAt) {
 function addDaysISO(days) {
   const d = new Date();
   d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  return localTodayStr(d);
 }
 
 function slugify(text) {
@@ -112,7 +113,6 @@ export default function SuperAdminDashboard({ userRole, setUserRole, onLoginAsTe
     try {
       const headers = {
         "Authorization": `Bearer ${adminToken}`,
-        "X-Test-Role": "super_admin"
       };
       const [tRes, sRes] = await Promise.all([
         fetch("/api/saas-admin/tenants", { headers }),
@@ -180,7 +180,10 @@ export default function SuperAdminDashboard({ userRole, setUserRole, onLoginAsTe
       const updated = { ...prev, name: val };
       if (!isSlugManual) {
         updated.id = autoSlug;
-        updated.admin_username = autoSlug ? `admin@${autoSlug}.com` : "";
+        // Username stays simply "admin" - that is what the tenant's login
+        // gate pre-fills and what operators tell the client to type. (It used
+        // to become "admin@<slug>.com", which the gate never matches.)
+        updated.admin_username = "admin";
         updated.admin_email = autoSlug ? `admin@${autoSlug}.com` : "";
       }
       if (!prev.contact_name) {
@@ -222,7 +225,7 @@ export default function SuperAdminDashboard({ userRole, setUserRole, onLoginAsTe
     const payload = {
       ...newTenantForm,
       id: newTenantForm.id.toLowerCase().trim(),
-      admin_username: newTenantForm.admin_username || `admin_${newTenantForm.id}`,
+      admin_username: newTenantForm.admin_username || "admin",
       admin_password: newTenantForm.admin_password || `${newTenantForm.id}#2026!`,
       admin_email: newTenantForm.admin_email || `admin@${newTenantForm.id}.com`,
       trial_ends_at: newTenantForm.trial_ends_at || null
@@ -234,7 +237,6 @@ export default function SuperAdminDashboard({ userRole, setUserRole, onLoginAsTe
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${adminToken}`,
-          "X-Test-Role": "super_admin"
         },
         body: JSON.stringify(payload)
       });
@@ -310,7 +312,6 @@ export default function SuperAdminDashboard({ userRole, setUserRole, onLoginAsTe
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${adminToken}`,
-        "X-Test-Role": "super_admin"
       },
       body: JSON.stringify({
         feature_flags: updatedFlags,
@@ -346,7 +347,6 @@ export default function SuperAdminDashboard({ userRole, setUserRole, onLoginAsTe
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${adminToken}`,
-        "X-Test-Role": "super_admin"
       },
       body: JSON.stringify(payload)
     });
@@ -363,7 +363,6 @@ export default function SuperAdminDashboard({ userRole, setUserRole, onLoginAsTe
       method: "POST",
       headers: {
         "Authorization": `Bearer ${adminToken}`,
-        "X-Test-Role": "super_admin"
       }
     });
     if (res.ok) {
@@ -377,7 +376,6 @@ export default function SuperAdminDashboard({ userRole, setUserRole, onLoginAsTe
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${adminToken}`,
-        "X-Test-Role": "super_admin"
       },
       body: JSON.stringify({
         is_active: !tenant.is_active,
@@ -393,7 +391,6 @@ export default function SuperAdminDashboard({ userRole, setUserRole, onLoginAsTe
       method: "DELETE",
       headers: {
         "Authorization": `Bearer ${adminToken}`,
-        "X-Test-Role": "super_admin"
       }
     });
     if (res.ok) fetchTenants();
@@ -413,7 +410,6 @@ export default function SuperAdminDashboard({ userRole, setUserRole, onLoginAsTe
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${adminToken}`,
-          "X-Test-Role": "super_admin"
         },
         body: JSON.stringify({ new_password: newResetPassword.trim() })
       });

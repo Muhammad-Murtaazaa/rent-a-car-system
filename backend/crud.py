@@ -2,6 +2,36 @@ from sqlalchemy.orm import Session, joinedload
 from backend import models, schemas
 from datetime import datetime, date
 from fastapi import HTTPException, status
+import re as _re
+
+def next_document_number(db: Session, model, number_field: str, tenant_id: str, prefix: str) -> str:
+    """Next sequential document number (e.g. RCP-1003) for a tenant.
+
+    Uses a persistent per-tenant counter that only moves forward, so a number
+    is NEVER re-issued - the old count-based scheme reused the number of a
+    deleted document, producing two different official receipts/quotations/
+    invoices with the same number. The counter is seeded once from the highest
+    number already in use. It increments inside the caller's transaction, so
+    it commits (or rolls back) together with the document itself.
+    """
+    counter = db.query(models.DocumentCounter).filter(
+        models.DocumentCounter.tenant_id == tenant_id,
+        models.DocumentCounter.prefix == prefix
+    ).first()
+    if counter is None:
+        rows = db.query(getattr(model, number_field)).filter(model.tenant_id == tenant_id).all()
+        highest = 1000
+        for (value,) in rows:
+            if not value:
+                continue
+            m = _re.search(r"(\d+)\s*$", str(value))
+            if m:
+                highest = max(highest, int(m.group(1)))
+        counter = models.DocumentCounter(tenant_id=tenant_id, prefix=prefix, last_number=highest)
+        db.add(counter)
+    counter.last_number += 1
+    db.flush()
+    return f"{prefix}-{counter.last_number}"
 
 # --- Cars CRUD ---
 def get_car(db: Session, car_id: int, tenant_id: str):
@@ -43,6 +73,19 @@ def update_car(db: Session, car_id: int, car_update: schemas.CarUpdate, tenant_i
 def delete_car(db: Session, car_id: int, tenant_id: str):
     db_car = get_car(db, car_id, tenant_id)
     if db_car:
+        # Bookings/maintenance rows reference the car (FK enforced), so a car
+        # with history cannot be removed - the delete used to crash with a
+        # 500. Refuse cleanly and tell the operator what to do instead.
+        refs = (
+            db.query(models.BookedCar).filter(models.BookedCar.car_id == car_id, models.BookedCar.tenant_id == tenant_id).count()
+            + db.query(models.Booking).filter(models.Booking.car_id == car_id, models.Booking.tenant_id == tenant_id).count()
+            + db.query(models.MaintenanceLog).filter(models.MaintenanceLog.car_id == car_id, models.MaintenanceLog.tenant_id == tenant_id).count()
+        )
+        if refs:
+            raise HTTPException(
+                status_code=400,
+                detail="This car has booking/maintenance history and cannot be deleted. Set its status to 'In Workshop' or remove it from service instead."
+            )
         db.delete(db_car)
         db.commit()
     return db_car
@@ -79,6 +122,15 @@ def update_customer(db: Session, customer_id: int, customer_update: schemas.Cust
 def delete_customer(db: Session, customer_id: int, tenant_id: str):
     db_customer = get_customer(db, customer_id, tenant_id)
     if db_customer:
+        refs = db.query(models.Booking).filter(
+            models.Booking.customer_id == customer_id,
+            models.Booking.tenant_id == tenant_id
+        ).count()
+        if refs:
+            raise HTTPException(
+                status_code=400,
+                detail="This customer has booking history and cannot be deleted."
+            )
         db.delete(db_customer)
         db.commit()
     return db_customer
@@ -164,8 +216,11 @@ def create_booking(db: Session, booking: schemas.BookingCreate, tenant_id: str):
     if not db_customer:
         raise HTTPException(status_code=404, detail="Customer not found")
     
+    # Compare digits-only on both sides so a CNIC stored with dashes anywhere
+    # cannot slip past the blacklist (and a dashed blacklist row still matches).
+    customer_cnic_digits = (db_customer.cnic_number or "").replace("-", "").strip()
     blacklisted = db.query(models.Blacklist).filter(
-        models.Blacklist.cnic_number == db_customer.cnic_number,
+        models.Blacklist.cnic_number.in_([db_customer.cnic_number, customer_cnic_digits]),
         models.Blacklist.tenant_id == tenant_id
     ).first()
     if blacklisted:
@@ -250,38 +305,74 @@ def update_booking(db: Session, booking_id: int, booking_update: schemas.Booking
 
     # If updating dates/car and the booking is Active/Reserved
     status_val = booking_update.status if booking_update.status is not None else db_booking.status
-    if status_val in ["Active", "Reserved"] and (booking_update.car_id is not None or booking_update.start_datetime is not None or booking_update.expected_end_datetime is not None):
-        overlap = check_overlapping_bookings(db, new_car_id, new_start, new_end, tenant_id, exclude_booking_id=booking_id)
-        if overlap:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Car collision detected! The selected car is already booked from {overlap.start_datetime} to {overlap.expected_end_datetime}."
-            )
+    if status_val in ["Active", "Reserved"] and (booking_update.car_id is not None or booking_update.start_datetime is not None or booking_update.expected_end_datetime is not None or booking_update.booked_cars is not None):
+        # Check EVERY car that will be on the booking, not just the primary one
+        car_ids_to_check = {new_car_id}
+        if booking_update.booked_cars is not None:
+            car_ids_to_check.update(bc.car_id for bc in booking_update.booked_cars)
+        elif db_booking.booked_cars:
+            car_ids_to_check.update(bc.car_id for bc in db_booking.booked_cars)
+        for cid in car_ids_to_check:
+            if not cid:
+                continue
+            overlap = check_overlapping_bookings(db, cid, new_start, new_end, tenant_id, exclude_booking_id=booking_id)
+            if overlap:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Car collision detected! Car #{cid} is already booked from {overlap.start_datetime} to {overlap.expected_end_datetime}."
+                )
 
-    # Update booked_cars if provided in body
+    # Reconcile booked_cars if provided in body: update rows that still apply,
+    # INSERT rows for newly added cars and DELETE rows for removed cars.
+    # Previously only existing rows were updated, so swapping a car in the edit
+    # form silently kept the old car on the booking while the primary car_id
+    # and daily_rate changed - an inconsistent booking saved without any error.
     if booking_update.booked_cars is not None:
-        for bc_up in booking_update.booked_cars:
-            db_bc = db.query(models.BookedCar).filter(
+        existing = {
+            bc.car_id: bc
+            for bc in db.query(models.BookedCar).filter(
                 models.BookedCar.booking_id == booking_id,
-                models.BookedCar.car_id == bc_up.car_id,
                 models.BookedCar.tenant_id == tenant_id
-            ).first()
-            if db_bc:
-                db_bc.start_odometer = bc_up.start_odometer
-                db_bc.return_odometer = bc_up.return_odometer
-                db_bc.fuel_level_on_start = bc_up.fuel_level_on_start
-                db_bc.fuel_level_on_return = bc_up.fuel_level_on_return
-                db_bc.extra_fuel_charge = bc_up.extra_fuel_charge
-                db_bc.structural_damage_charge = bc_up.structural_damage_charge
-                db_bc.daily_rate = bc_up.daily_rate
-                if hasattr(bc_up, "car_wash_charge") and bc_up.car_wash_charge is not None:
-                    db_bc.car_wash_charge = bc_up.car_wash_charge
-                if hasattr(bc_up, "overtime_charge") and bc_up.overtime_charge is not None:
-                    db_bc.overtime_charge = bc_up.overtime_charge
-                if hasattr(bc_up, "was_given_washed") and bc_up.was_given_washed is not None:
-                    db_bc.was_given_washed = bc_up.was_given_washed
-                if hasattr(bc_up, "is_returned_unwashed") and bc_up.is_returned_unwashed is not None:
-                    db_bc.is_returned_unwashed = bc_up.is_returned_unwashed
+            ).all()
+        }
+        incoming_ids = set()
+        for bc_up in booking_update.booked_cars:
+            incoming_ids.add(bc_up.car_id)
+            db_bc = existing.get(bc_up.car_id)
+            if db_bc is None:
+                car = get_car(db, bc_up.car_id, tenant_id)
+                if not car:
+                    raise HTTPException(status_code=404, detail=f"Car #{bc_up.car_id} not found for this agency.")
+                db_bc = models.BookedCar(
+                    booking_id=booking_id,
+                    car_id=bc_up.car_id,
+                    tenant_id=tenant_id,
+                    daily_rate=bc_up.daily_rate or 0.0,
+                    start_odometer=bc_up.start_odometer or 0,
+                    fuel_level_on_start=bc_up.fuel_level_on_start or "Full"
+                )
+                db.add(db_bc)
+                existing[bc_up.car_id] = db_bc
+                continue
+            db_bc.start_odometer = bc_up.start_odometer
+            db_bc.return_odometer = bc_up.return_odometer
+            db_bc.fuel_level_on_start = bc_up.fuel_level_on_start
+            db_bc.fuel_level_on_return = bc_up.fuel_level_on_return
+            db_bc.extra_fuel_charge = bc_up.extra_fuel_charge
+            db_bc.structural_damage_charge = bc_up.structural_damage_charge
+            db_bc.daily_rate = bc_up.daily_rate
+            if hasattr(bc_up, "car_wash_charge") and bc_up.car_wash_charge is not None:
+                db_bc.car_wash_charge = bc_up.car_wash_charge
+            if hasattr(bc_up, "overtime_charge") and bc_up.overtime_charge is not None:
+                db_bc.overtime_charge = bc_up.overtime_charge
+            if hasattr(bc_up, "was_given_washed") and bc_up.was_given_washed is not None:
+                db_bc.was_given_washed = bc_up.was_given_washed
+            if hasattr(bc_up, "is_returned_unwashed") and bc_up.is_returned_unwashed is not None:
+                db_bc.is_returned_unwashed = bc_up.is_returned_unwashed
+        for cid, db_bc in existing.items():
+            if cid not in incoming_ids:
+                db.delete(db_bc)
+        db.flush()
 
     # Apply updates to Booking model
     booking_data = booking_update.dict(exclude_unset=True, exclude={"booked_cars"})
@@ -849,6 +940,12 @@ def update_employee(db: Session, employee_id: int, employee_update: schemas.Empl
 def delete_employee(db: Session, employee_id: int, tenant_id: str):
     db_emp = get_employee(db, employee_id, tenant_id)
     if db_emp:
+        # Payments reference the employee (FK enforced) - remove them first,
+        # otherwise deleting an employee who was ever paid crashed with a 500.
+        db.query(models.EmployeePayment).filter(
+            models.EmployeePayment.employee_id == employee_id,
+            models.EmployeePayment.tenant_id == tenant_id
+        ).delete(synchronize_session=False)
         db.delete(db_emp)
         db.commit()
     return db_emp
@@ -917,8 +1014,7 @@ def get_quotation(db: Session, quotation_id: int, tenant_id: str):
 def create_quotation(db: Session, quotation: schemas.QuotationCreate, tenant_id: str):
     data = quotation.dict()
     if not data.get("quote_number"):
-        count = db.query(models.Quotation).filter(models.Quotation.tenant_id == tenant_id).count()
-        data["quote_number"] = f"QT-{1001 + count}"
+        data["quote_number"] = next_document_number(db, models.Quotation, "quote_number", tenant_id, "QT")
     db_q = models.Quotation(**data, tenant_id=tenant_id)
     db.add(db_q)
     db.commit()
@@ -959,9 +1055,17 @@ def get_receipt(db: Session, receipt_id: int, tenant_id: str):
 
 def create_receipt(db: Session, receipt: schemas.ReceiptCreate, tenant_id: str):
     data = receipt.dict()
+    if data.get("booking_id"):
+        booking = db.query(models.Booking).filter(
+            models.Booking.id == data["booking_id"],
+            models.Booking.tenant_id == tenant_id
+        ).first()
+        if not booking:
+            # Previously this fell through to the insert and crashed with a
+            # 500 foreign-key error (and allowed cross-tenant linkage).
+            raise HTTPException(status_code=404, detail="Linked booking not found for this agency.")
     if not data.get("receipt_number"):
-        count = db.query(models.Receipt).filter(models.Receipt.tenant_id == tenant_id).count()
-        data["receipt_number"] = f"RCP-{1001 + count}"
+        data["receipt_number"] = next_document_number(db, models.Receipt, "receipt_number", tenant_id, "RCP")
     db_r = models.Receipt(**data, tenant_id=tenant_id)
     db.add(db_r)
     db.commit()
@@ -993,8 +1097,7 @@ def get_vehicle_invoice(db: Session, invoice_id: int, tenant_id: str):
 def create_vehicle_invoice(db: Session, invoice: schemas.VehicleInvoiceCreate, tenant_id: str):
     data = invoice.dict()
     if not data.get("invoice_number"):
-        count = db.query(models.VehicleInvoice).filter(models.VehicleInvoice.tenant_id == tenant_id).count()
-        data["invoice_number"] = f"INV-{1001 + count}"
+        data["invoice_number"] = next_document_number(db, models.VehicleInvoice, "invoice_number", tenant_id, "INV")
     db_inv = models.VehicleInvoice(**data, tenant_id=tenant_id)
     db.add(db_inv)
     db.commit()
@@ -1036,8 +1139,7 @@ def get_official_letter(db: Session, letter_id: int, tenant_id: str):
 def create_official_letter(db: Session, letter: schemas.OfficialLetterCreate, tenant_id: str):
     data = letter.dict()
     if not data.get("letter_number"):
-        count = db.query(models.OfficialLetter).filter(models.OfficialLetter.tenant_id == tenant_id).count()
-        data["letter_number"] = f"LTR-{1001 + count}"
+        data["letter_number"] = next_document_number(db, models.OfficialLetter, "letter_number", tenant_id, "LTR")
     db_ltr = models.OfficialLetter(**data, tenant_id=tenant_id)
     db.add(db_ltr)
     db.commit()

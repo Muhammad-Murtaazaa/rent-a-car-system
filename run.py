@@ -6,6 +6,11 @@ import threading
 import subprocess
 import uvicorn
 
+# This launcher is ONLY for the local offline install on the shop's own machine,
+# so demo auth (header-role fallback + shared demo passwords) is enabled here.
+# The internet server must NOT set this - there demo auth stays off.
+os.environ.setdefault("ALLOW_DEMO_AUTH", "1")
+
 def build_frontend():
     """Offline app serves frontend/dist — rebuild so JSX edits actually ship."""
     frontend_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend")

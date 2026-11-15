@@ -155,6 +155,10 @@ def ensure_sqlite_columns():
 ensure_sqlite_columns()
 
 def seed_default_admin():
+    # Only the local demo install gets a seeded default admin with the shared
+    # demo password. On a server, tenant users are created by provisioning.
+    if not auth.ALLOW_DEMO_AUTH:
+        return
     try:
         from backend.database import SessionLocal
         with SessionLocal() as db:
@@ -164,7 +168,7 @@ def seed_default_admin():
                     tenant_id="default",
                     username="admin",
                     email="admin@racms.omnysync.com",
-                    hashed_password=get_password_hash("OmnysyncPassword123"),
+                    hashed_password=get_password_hash(auth.DEMO_TENANT_PASSWORD),
                     role="tenant_admin",
                     full_name="Default Agency Admin",
                     is_active=True
@@ -174,6 +178,14 @@ def seed_default_admin():
         print("seed_default_admin error:", e)
 
 seed_default_admin()
+
+if auth.ALLOW_DEMO_AUTH:
+    print("[SECURITY WARNING] ALLOW_DEMO_AUTH is ON: shared demo passwords and the "
+          "default-workspace header fallback are active. This is for the LOCAL offline "
+          "install only - never run an internet-facing server like this.")
+if not auth.SUPER_ADMIN_PASSWORD and not auth.ALLOW_DEMO_AUTH:
+    print("[SECURITY WARNING] SUPER_ADMIN_PASSWORD is not set: Super Admin login is "
+          "disabled until it is set in the server environment.")
 
 # Initialize Rate Limiter
 limiter = Limiter(key_func=get_remote_address)
@@ -376,12 +388,15 @@ def upload_file_securely(file: UploadFile) -> str:
 @app.post("/api/auth/super-admin/login")
 @limiter.limit("10/minute")
 def super_admin_login(request: Request, payload: schemas.SuperAdminLoginRequest):
-    allowed_passwords = {
-        auth.SUPER_ADMIN_PASSWORD,
-        "OmnysyncSuper2026!",
-        "omnysync67"
-    }
-    if payload.password in allowed_passwords:
+    # Only the password from the server environment (plus the demo password in
+    # local demo mode). The previously hardcoded passwords were removed - they
+    # were readable by anyone with a copy of this source code.
+    allowed_passwords = set()
+    if auth.SUPER_ADMIN_PASSWORD:
+        allowed_passwords.add(auth.SUPER_ADMIN_PASSWORD)
+    if auth.ALLOW_DEMO_AUTH:
+        allowed_passwords.add(auth.DEMO_SUPER_ADMIN_PASSWORD)
+    if allowed_passwords and payload.password in allowed_passwords:
         token = create_access_token(
             data={"sub": "super_admin", "role": "super_admin", "tenant_id": "system"},
             expires_delta=timedelta(days=7)
@@ -410,6 +425,9 @@ def tenant_login_json(request: Request, payload: schemas.TenantLoginRequest, db:
     if not tenant.is_active:
         raise HTTPException(status_code=403, detail="Tenant account is suspended. Contact Omnysync administrator.")
 
+    if (tenant.subscription_status or "").lower() in ("expired", "suspended", "cancelled", "canceled"):
+        raise HTTPException(status_code=403, detail="This agency's subscription is not active. Contact Omnysync administrator.")
+
     # Check 7-day trial expiration
     if tenant.subscription_status == "trialing" and tenant.trial_ends_at:
         if tenant.trial_ends_at < date.today():
@@ -423,9 +441,19 @@ def tenant_login_json(request: Request, payload: schemas.TenantLoginRequest, db:
         (models.TenantUser.username == uname) | (models.TenantUser.email == uname)
     ).first()
 
-    # Bootstrap or fallback
+    # Demo-mode bootstrap ONLY (local offline install): the shared demo password
+    # can create the first user. On a server (demo auth off) there is NO shared
+    # password: previously the master passwords below logged into EVERY tenant
+    # and silently created admin users for any username, which meant anyone who
+    # had seen this source code could walk into any agency's workspace.
+    demo_bootstrap_passwords = set()
+    if auth.ALLOW_DEMO_AUTH:
+        demo_bootstrap_passwords.add(auth.DEMO_TENANT_PASSWORD)
+        if auth.SUPER_ADMIN_PASSWORD:
+            demo_bootstrap_passwords.add(auth.SUPER_ADMIN_PASSWORD)
+
     if not user:
-        if pwd in ("OmnysyncPassword123", "omnysync67", auth.SUPER_ADMIN_PASSWORD):
+        if demo_bootstrap_passwords and pwd in demo_bootstrap_passwords:
             user = models.TenantUser(
                 tenant_id=t_id,
                 username=uname or "admin",
@@ -443,7 +471,10 @@ def tenant_login_json(request: Request, payload: schemas.TenantLoginRequest, db:
     else:
         if not user.is_active:
             raise HTTPException(status_code=403, detail="User account is deactivated.")
-        if not verify_password(pwd, user.hashed_password) and pwd not in ("OmnysyncPassword123", "omnysync67", auth.SUPER_ADMIN_PASSWORD):
+        password_ok = verify_password(pwd, user.hashed_password)
+        if not password_ok and auth.ALLOW_DEMO_AUTH and pwd in demo_bootstrap_passwords:
+            password_ok = True
+        if not password_ok:
             raise HTTPException(status_code=401, detail="Invalid username or password.")
 
     token = create_access_token(
@@ -1084,7 +1115,22 @@ def create_quick_event_booking(
 ):
     tenant_id = tenant_context["tenant_id"]
 
-    # 1. Check CNIC against Blacklist
+    # 0. Validate the money and quantity up front
+    if payload.total_rent is None or payload.total_rent <= 0:
+        raise HTTPException(status_code=400, detail="Total rent must be greater than 0.")
+    advance_in = payload.advance_paid or 0.0
+    if advance_in < 0:
+        raise HTTPException(status_code=400, detail="Advance paid cannot be negative.")
+    if advance_in > payload.total_rent:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Advance paid (PKR {advance_in:,.0f}) cannot exceed the total rent decided (PKR {payload.total_rent:,.0f})."
+        )
+    if (payload.security_deposit_amount or 0) < 0:
+        raise HTTPException(status_code=400, detail="Security deposit cannot be negative.")
+
+    # 1. Check CNIC against Blacklist (CNICs are always compared/stored digits-only,
+    # so "35202-xxxxxxx-x" and "35202xxxxxxx" are the same person everywhere)
     clean_cnic = payload.cnic.replace("-", "").strip()
     blacklisted = db.query(models.Blacklist).filter(
         models.Blacklist.tenant_id == tenant_id,
@@ -1096,7 +1142,7 @@ def create_quick_event_booking(
             detail=f"Customer is BLACKLISTED! Reason: {blacklisted.reason_flag}"
         )
 
-    # 2. Find or create customer
+    # 2. Find or create customer (store the CNIC digits-only, like every other path)
     customer = db.query(models.Customer).filter(
         models.Customer.tenant_id == tenant_id,
         (models.Customer.cnic_number == payload.cnic.strip()) | (models.Customer.cnic_number == clean_cnic)
@@ -1106,23 +1152,35 @@ def create_quick_event_booking(
             tenant_id=tenant_id,
             full_name=payload.client_name.strip(),
             phone_primary=payload.phone.strip(),
-            cnic_number=payload.cnic.strip(),
+            cnic_number=clean_cnic,
             home_address=payload.pickup_location or "N/A",
-            license_number=f"LIC-{payload.cnic.strip()[-6:]}"
+            license_number=f"LIC-{clean_cnic[-6:]}"
         )
         db.add(customer)
         db.flush()
 
+    start_dt = payload.start_datetime or datetime.now()
+    end_dt = payload.expected_end_datetime or (start_dt + timedelta(days=1))
+    if end_dt <= start_dt:
+        raise HTTPException(status_code=400, detail="Event end time must be after the start time.")
+    duration_days = max(1, (end_dt.date() - start_dt.date()).days or 1)
+
     # 3. Determine cars list
-    selected_car_ids = payload.car_ids or []
+    requested_qty = payload.cars_qty or 1
+    if requested_qty < 1:
+        raise HTTPException(status_code=400, detail="Cars quantity must be at least 1.")
+    # De-duplicate while keeping order
+    selected_car_ids = list(dict.fromkeys(payload.car_ids or []))
     if not selected_car_ids:
-        first_available = db.query(models.Car).filter(
+        # No explicit cars: use as many genuinely Available cars as requested.
+        # Previously this silently booked ONE car while recording cars_qty=3,
+        # so the paperwork claimed 3 cars and the full rent sat on a single car.
+        available = db.query(models.Car).filter(
             models.Car.tenant_id == tenant_id,
             models.Car.status == "Available"
-        ).first()
-        if first_available:
-            selected_car_ids = [first_available.id]
-        else:
+        ).limit(requested_qty).all()
+        selected_car_ids = [c.id for c in available]
+        if not selected_car_ids:
             any_car = db.query(models.Car).filter(models.Car.tenant_id == tenant_id).first()
             if any_car:
                 selected_car_ids = [any_car.id]
@@ -1143,17 +1201,17 @@ def create_quick_event_booking(
                 db.flush()
                 selected_car_ids = [fleet_car.id]
 
+    # Split the decided rent evenly: per-car daily rate x days x cars == total rent,
+    # and the per-car rates sum to the booking's daily rate (finance reports rely on this).
+    per_car_daily_rate = payload.total_rent / duration_days / max(1, len(selected_car_ids))
     booked_cars_list = [
         schemas.BookedCarCreate(
             car_id=cid,
-            daily_rate=payload.total_rent / max(1, len(selected_car_ids))
+            daily_rate=per_car_daily_rate
         )
         for cid in selected_car_ids
     ]
 
-    start_dt = payload.start_datetime or datetime.now()
-    end_dt = payload.expected_end_datetime or (start_dt + timedelta(days=1))
-    duration_days = max(1, (end_dt.date() - start_dt.date()).days or 1)
     daily_rate_total = payload.total_rent / duration_days
 
     # 4. Create booking
@@ -1175,7 +1233,7 @@ def create_quick_event_booking(
         event_timing=payload.event_timing,
         road_plan=payload.road_plan,
         fuel_package=payload.fuel_package or "Without Fuel",
-        cars_qty=payload.cars_qty or len(selected_car_ids),
+        cars_qty=len(selected_car_ids),
         total_rent_decided=payload.total_rent,
         advance_paid=payload.advance_paid or 0.0,
         booked_cars=booked_cars_list
@@ -1323,9 +1381,19 @@ def provision_tenant(
     db_tenant = crud.get_tenant(db, tenant_id)
     if db_tenant:
         raise HTTPException(status_code=400, detail=f"Subdomain/Tenant '{tenant_id}' already exists")
+    # Store the tenant under the NORMALIZED id - create_tenant previously used
+    # the raw payload id, so "Azeem-Rent-A-Car" was checked as one tenant and
+    # stored as another, and the subdomain never matched the stored row.
+    tenant.id = tenant_id
     
     admin_user = (tenant.admin_username or f"admin_{tenant_id}").strip()
-    admin_pass = (tenant.admin_password or f"{tenant_id.capitalize()}#2026").strip()
+    # Never fall back to a predictable password derived from the tenant id
+    # (anyone could guess "Azeem-rent-a-car#2026"). Generate a random one and
+    # hand it to the operator in the provisioning response instead.
+    admin_pass = (tenant.admin_password or "").strip()
+    if not admin_pass:
+        import secrets as _secrets
+        admin_pass = _secrets.token_urlsafe(12)
     admin_mail = (tenant.admin_email or f"{admin_user}@{tenant_id}.com").strip()
 
     # Default branding values if empty
@@ -1414,12 +1482,26 @@ def remove_tenant(
     db_tenant = crud.get_tenant(db, tenant_id)
     if not db_tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
-    # Clean up associated tenant credentials
-    db.query(models.TenantUser).filter(models.TenantUser.tenant_id == tenant_id).delete()
+    # Delete ALL of the tenant's data, children first. Previously only the
+    # login users were removed, so the tenant's cars/bookings/customers stayed
+    # behind orphaned - and if the same subdomain was ever re-provisioned, the
+    # NEW agency would silently inherit the OLD agency's data.
+    tenant_models_children_first = [
+        models.BookedCar, models.Financial, models.InvestorPayout,
+        models.ShareholderPayout, models.EmployeePayment, models.Booking,
+        models.MaintenanceLog, models.Receipt, models.VehicleInvoice,
+        models.OfficialLetter, models.Quotation, models.Lead,
+        models.SupplierDeal, models.PartnerAgency, models.ChauffeurDriver,
+        models.Employee, models.Investor, models.Shareholder,
+        models.Customer, models.Car, models.Blacklist,
+        models.DocumentCounter, models.TenantUser,
+    ]
+    for model in tenant_models_children_first:
+        db.query(model).filter(model.tenant_id == tenant_id).delete(synchronize_session=False)
     db.delete(db_tenant)
     db.commit()
     sync_caddy_tenants(db)
-    return {"message": f"Tenant '{tenant_id}' deleted successfully"}
+    return {"message": f"Tenant '{tenant_id}' and all its data deleted successfully"}
 
 @app.post("/api/saas-admin/tenants/{tenant_id}/reset-password")
 def reset_tenant_password(
@@ -1435,7 +1517,7 @@ def reset_tenant_password(
     if not user:
         user = models.TenantUser(
             tenant_id=tenant_id,
-            username=f"admin_{tenant_id}",
+            username="admin",
             email=f"admin@{tenant_id}.com",
             hashed_password=get_password_hash(new_password),
             role="tenant_admin",

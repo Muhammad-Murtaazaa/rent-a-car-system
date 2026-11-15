@@ -290,10 +290,36 @@ export async function generateVehiclesQuotationPDF(q, branding) {
     y += 10;
   });
 
+  // Totals - the customer-facing PDF previously showed line items with NO
+  // total at all, although the app computes one. Same math as QuotationsView.
+  const itemsTotal = items.reduce((s, it) => s + (Number(it.amount) || 0), 0);
+  const discount = Number(q.discount_amount) || 0;
+  const taxPct = Number(q.tax_percentage) || 0;
+  const subAfterDiscount = Math.max(0, itemsTotal - discount);
+  const taxVal = Math.round(subAfterDiscount * (taxPct / 100));
+  const grandTotal = Number(q.total_amount) > 0 ? Number(q.total_amount) : subAfterDiscount + taxVal;
+  y += 6;
+  doc.setFontSize(10.5);
+  doc.setTextColor(25, 25, 28);
+  const totalRow = (label, value, bold = false) => {
+    doc.setFont("helvetica", bold ? "bold" : "normal");
+    doc.text(label, 146, y, { align: "right" });
+    doc.text(Number(value).toLocaleString(), 169, y, { align: "center" });
+    y += 7;
+  };
+  totalRow("Subtotal:", itemsTotal);
+  if (discount > 0) totalRow("Discount:", -discount);
+  if (taxPct > 0) totalRow(`Tax (${taxPct}%):`, taxVal);
+  doc.setDrawColor(r, g, b);
+  doc.setLineWidth(0.6);
+  doc.line(104, y - 4, 192, y - 4);
+  totalRow("GRAND TOTAL (PKR):", grandTotal, true);
+
   if (q.valid_until) {
+    doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
     doc.setTextColor(90, 90, 100);
-    doc.text(`Quote #${q.quote_number || q.id} · Valid Until: ${q.valid_until}`, 18, y + 10);
+    doc.text(`Quote #${q.quote_number || q.id} · Valid Until: ${q.valid_until}`, 18, y + 6);
   }
 
   drawFooter(doc, agency, q.notes || agency.terms);

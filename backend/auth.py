@@ -7,12 +7,34 @@ import bcrypt
 from jose import JWTError, jwt
 
 # Security configurations
-SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "super-secret-key-change-in-production")
+# Demo auth (header-role fallback + shared demo passwords) is for the LOCAL offline
+# install only (run.py enables it). Internet deployments must run with it OFF:
+# it defaults to OFF so a server that forgets the env var fails closed, not open.
+ALLOW_DEMO_AUTH = os.environ.get("ALLOW_DEMO_AUTH", "0").strip() not in ("0", "false", "False", "no")
+
+_env_secret = os.environ.get("JWT_SECRET_KEY")
+if _env_secret:
+    SECRET_KEY = _env_secret
+elif ALLOW_DEMO_AUTH:
+    SECRET_KEY = "local-demo-secret-do-not-use-on-a-server"
+else:
+    # No secret configured on an internet deploy: use a random per-boot secret.
+    # Tokens simply stop working across restarts (users log in again) instead of
+    # every deployment sharing one publicly-known signing key.
+    import secrets as _secrets
+    SECRET_KEY = _secrets.token_hex(32)
+    print("[SECURITY] JWT_SECRET_KEY is not set - using a random per-boot secret. "
+          "Set JWT_SECRET_KEY in the server environment for stable sessions.")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days session
-SUPER_ADMIN_PASSWORD = os.environ.get("SUPER_ADMIN_PASSWORD", "OmnysyncSuper2026!")
-# Offline shop default: allow header role/tenant (local LAN). Set ALLOW_DEMO_AUTH=0 for internet deploy.
-ALLOW_DEMO_AUTH = os.environ.get("ALLOW_DEMO_AUTH", "1").strip() not in ("0", "false", "False", "no")
+
+# Super Admin password comes from the environment ONLY. The old hardcoded
+# fallbacks were removed: they were visible in the source code, so anyone with
+# the code knew the master password for every deployment.
+SUPER_ADMIN_PASSWORD = os.environ.get("SUPER_ADMIN_PASSWORD")
+# Shared demo passwords - honoured ONLY in local demo mode (ALLOW_DEMO_AUTH=1).
+DEMO_SUPER_ADMIN_PASSWORD = "OmnysyncSuper2026!"
+DEMO_TENANT_PASSWORD = "OmnysyncPassword123"
 
 security = HTTPBearer(auto_error=False)
 
@@ -138,9 +160,11 @@ def require_roles(allowed_roles: list[str]):
     return dependency
 
 def require_super_admin(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
-    x_test_role: Optional[str] = Header(None, alias="X-Test-Role")
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ):
+    # A valid super-admin JWT is the ONLY way in. The previous X-Test-Role header
+    # bypass let anyone on the internet list/delete tenants and reset tenant
+    # passwords with no credentials at all, so it has been removed entirely.
     if credentials:
         try:
             payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
@@ -148,8 +172,6 @@ def require_super_admin(
                 return payload
         except JWTError:
             pass
-    if ALLOW_DEMO_AUTH and x_test_role == "super_admin":
-        return {"sub": "super_admin", "role": "super_admin", "tenant_id": "system"}
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Super Admin access denied. Super Admin authentication required."

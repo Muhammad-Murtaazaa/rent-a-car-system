@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { localTodayStr, localDateTimeStr } from "./dateUtils";
 import { 
   Building2, Plus, Search, Trash2, Edit2, X, Send, 
   DollarSign, TrendingUp, Car, Phone, Calendar, ArrowRightLeft,
@@ -53,7 +54,7 @@ export default function SuppliersView({ supplierDeals = [], fetchData, branding 
   const [showDealModal, setShowDealModal] = useState(false);
   const [editingDeal, setEditingDeal] = useState(null);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localTodayStr();
   const nextWeek = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10);
 
   const emptyDealForm = {
@@ -217,6 +218,9 @@ export default function SuppliersView({ supplierDeals = [], fetchData, branding 
       if (res.ok) {
         setShowPartnerModal(false);
         loadPartnerAgencies();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.detail || "Failed to save partner agency.");
       }
     } catch (e) {
       alert("Failed to save partner agency.");
@@ -300,9 +304,85 @@ export default function SuppliersView({ supplierDeals = [], fetchData, branding 
       if (res.ok) {
         setShowDriverModal(false);
         loadDrivers();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.detail || "Failed to save driver.");
       }
     } catch (e) {
       alert("Failed to save driver.");
+    }
+  };
+
+  // --- Sublet Deal submit/delete ---
+  // The deals tab, form state and backend CRUD all existed, but there was no
+  // submit handler and no modal at all - "New Sublet Deal" was dead UI.
+  const handleDealSubmit = async (e) => {
+    e.preventDefault();
+    const days = Math.max(1, parseInt(dealForm.days, 10) || 1);
+    const supplierTotal = days * (parseFloat(dealForm.supplier_daily_rate) || 0);
+    const clientTotal = days * (parseFloat(dealForm.client_daily_rate) || 0);
+    const totalExpenses = (parseFloat(dealForm.driver_expense) || 0) + (parseFloat(dealForm.fuel_expense) || 0) + (parseFloat(dealForm.other_expense) || 0);
+    const payload = {
+      supplier_name: (dealForm.supplier_name || "").trim(),
+      supplier_phone: (dealForm.supplier_phone || "").trim(),
+      supplier_cnic: (dealForm.supplier_cnic || "").trim() || null,
+      car_make_model: (dealForm.car_make_model || "").trim(),
+      car_plate_number: (dealForm.car_plate_number || "").trim(),
+      car_color: (dealForm.car_color || "").trim() || null,
+      customer_name: (dealForm.customer_name || "").trim(),
+      customer_phone: (dealForm.customer_phone || "").trim(),
+      start_date: dealForm.start_date,
+      end_date: dealForm.end_date,
+      days,
+      supplier_daily_rate: parseFloat(dealForm.supplier_daily_rate) || 0,
+      supplier_total_cost: supplierTotal,
+      client_daily_rate: parseFloat(dealForm.client_daily_rate) || 0,
+      client_total_rent: clientTotal,
+      commission_amount: clientTotal - supplierTotal,
+      driver_expense: parseFloat(dealForm.driver_expense) || 0,
+      fuel_expense: parseFloat(dealForm.fuel_expense) || 0,
+      other_expense: parseFloat(dealForm.other_expense) || 0,
+      total_expenses: totalExpenses,
+      net_cash_profit: clientTotal - supplierTotal - totalExpenses,
+      client_received_amount: parseFloat(dealForm.client_received_amount) || 0,
+      client_remaining_balance: clientTotal - (parseFloat(dealForm.client_received_amount) || 0),
+      supplier_paid_amount: parseFloat(dealForm.supplier_paid_amount) || 0,
+      supplier_remaining_payable: supplierTotal - (parseFloat(dealForm.supplier_paid_amount) || 0),
+      status: dealForm.status || "Active",
+      notes: (dealForm.notes || "").trim() || null
+    };
+    try {
+      const url = editingDeal ? `/api/supplier-deals/${editingDeal.id}` : "/api/supplier-deals";
+      const method = editingDeal ? "PUT" : "POST";
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        setShowDealModal(false);
+        setEditingDeal(null);
+        loadDeals();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.detail || "Failed to save sublet deal.");
+      }
+    } catch (err) {
+      alert("Failed to save sublet deal.");
+    }
+  };
+
+  const handleDeleteDeal = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this sublet deal?")) return;
+    try {
+      const res = await fetch(`/api/supplier-deals/${id}`, { method: "DELETE" });
+      if (res.ok) loadDeals();
+      else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.detail || "Failed to delete sublet deal.");
+      }
+    } catch (err) {
+      alert("Failed to delete sublet deal.");
     }
   };
 
@@ -829,10 +909,135 @@ export default function SuppliersView({ supplierDeals = [], fetchData, branding 
                       <span className="font-mono">PKR {deal.net_cash_profit?.toLocaleString()}</span>
                     </div>
                   </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        setEditingDeal(deal);
+                        setDealForm({
+                          ...emptyDealForm,
+                          ...deal,
+                          start_date: deal.start_date ? String(deal.start_date).slice(0, 10) : today,
+                          end_date: deal.end_date ? String(deal.end_date).slice(0, 10) : nextWeek
+                        });
+                        setShowDealModal(true);
+                      }}
+                      className="flex-1 py-1.5 rounded-lg border border-[var(--border-color)] text-[11px] font-bold hover:bg-[var(--tr-hover)]"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => handleDeleteDeal(deal.id)}
+                      className="flex-1 py-1.5 rounded-lg border border-rose-500/30 text-rose-400 text-[11px] font-bold hover:bg-rose-500/10"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL: ADD / EDIT SUBLET DEAL */}
+      {/* ======================================================== */}
+      {showDealModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
+          <div className="glass-panel w-full max-w-2xl rounded-3xl border border-[var(--border-color)] bg-[var(--bg-card)] shadow-2xl p-6 space-y-5 my-auto animate-scale-up text-left">
+            <div className="flex justify-between items-center pb-3 border-b border-[var(--border-color)]">
+              <div>
+                <h3 className="text-lg font-bold text-[var(--text-main)]">
+                  {editingDeal ? "Edit Sublet Deal" : "New Sublet Deal"}
+                </h3>
+                <p className="text-xs text-[var(--text-muted)]">Car borrowed from a partner agency and re-rented to your customer</p>
+              </div>
+              <button onClick={() => { setShowDealModal(false); setEditingDeal(null); }} className="text-[var(--text-muted)] hover:text-[var(--text-main)]">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleDealSubmit} className="space-y-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold mb-1">Supplier / Partner Agency *</label>
+                  <input required value={dealForm.supplier_name} onChange={e => setDealForm({ ...dealForm, supplier_name: e.target.value })} className="w-full app-input rounded-xl p-2.5" placeholder="Partner agency name" />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Supplier Phone *</label>
+                  <input required value={dealForm.supplier_phone} onChange={e => setDealForm({ ...dealForm, supplier_phone: e.target.value })} className="w-full app-input rounded-xl p-2.5 font-mono" placeholder="03001234567" />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Car (Make & Model) *</label>
+                  <input required value={dealForm.car_make_model} onChange={e => setDealForm({ ...dealForm, car_make_model: e.target.value })} className="w-full app-input rounded-xl p-2.5" placeholder="e.g. Toyota Corolla" />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Plate Number *</label>
+                  <input required value={dealForm.car_plate_number} onChange={e => setDealForm({ ...dealForm, car_plate_number: e.target.value })} className="w-full app-input rounded-xl p-2.5 font-mono" placeholder="ABC-123" />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Customer Name *</label>
+                  <input required value={dealForm.customer_name} onChange={e => setDealForm({ ...dealForm, customer_name: e.target.value })} className="w-full app-input rounded-xl p-2.5" placeholder="Customer full name" />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Customer Phone *</label>
+                  <input required value={dealForm.customer_phone} onChange={e => setDealForm({ ...dealForm, customer_phone: e.target.value })} className="w-full app-input rounded-xl p-2.5 font-mono" placeholder="03001234567" />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Start Date</label>
+                  <input type="date" value={dealForm.start_date} onChange={e => setDealForm({ ...dealForm, start_date: e.target.value })} className="w-full app-input rounded-xl p-2.5" />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">End Date</label>
+                  <input type="date" value={dealForm.end_date} onChange={e => setDealForm({ ...dealForm, end_date: e.target.value })} className="w-full app-input rounded-xl p-2.5" />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Days</label>
+                  <input type="number" min="1" value={dealForm.days} onChange={e => setDealForm({ ...dealForm, days: e.target.value })} className="w-full app-input rounded-xl p-2.5" />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Status</label>
+                  <select value={dealForm.status} onChange={e => setDealForm({ ...dealForm, status: e.target.value })} className="w-full app-input rounded-xl p-2.5">
+                    <option value="Active">Active</option>
+                    <option value="Completed">Completed</option>
+                    <option value="Cancelled">Cancelled</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Supplier Daily Rate (PKR)</label>
+                  <input type="number" min="0" value={dealForm.supplier_daily_rate} onChange={e => setDealForm({ ...dealForm, supplier_daily_rate: e.target.value })} className="w-full app-input rounded-xl p-2.5 font-mono" />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Client Daily Rate (PKR)</label>
+                  <input type="number" min="0" value={dealForm.client_daily_rate} onChange={e => setDealForm({ ...dealForm, client_daily_rate: e.target.value })} className="w-full app-input rounded-xl p-2.5 font-mono" />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Received from Client (PKR)</label>
+                  <input type="number" min="0" value={dealForm.client_received_amount} onChange={e => setDealForm({ ...dealForm, client_received_amount: e.target.value })} className="w-full app-input rounded-xl p-2.5 font-mono" />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Paid to Supplier (PKR)</label>
+                  <input type="number" min="0" value={dealForm.supplier_paid_amount} onChange={e => setDealForm({ ...dealForm, supplier_paid_amount: e.target.value })} className="w-full app-input rounded-xl p-2.5 font-mono" />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Driver Expense (PKR)</label>
+                  <input type="number" min="0" value={dealForm.driver_expense} onChange={e => setDealForm({ ...dealForm, driver_expense: e.target.value })} className="w-full app-input rounded-xl p-2.5 font-mono" />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Fuel Expense (PKR)</label>
+                  <input type="number" min="0" value={dealForm.fuel_expense} onChange={e => setDealForm({ ...dealForm, fuel_expense: e.target.value })} className="w-full app-input rounded-xl p-2.5 font-mono" />
+                </div>
+              </div>
+              <div>
+                <label className="block font-semibold mb-1">Notes</label>
+                <textarea value={dealForm.notes || ""} onChange={e => setDealForm({ ...dealForm, notes: e.target.value })} className="w-full app-input rounded-xl p-2.5" rows="2" placeholder="Optional notes" />
+              </div>
+              <button type="submit" className="w-full py-2.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-white font-bold">
+                {editingDeal ? "Save Changes" : "Create Sublet Deal"}
+              </button>
+            </form>
+          </div>
         </div>
       )}
 
