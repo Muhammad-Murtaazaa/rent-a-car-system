@@ -41,6 +41,62 @@ export default function QuickEventBookingModal({
   const [error, setError] = useState("");
   const [successBooking, setSuccessBooking] = useState(null);
 
+  const [carSearchQuery, setCarSearchQuery] = useState("");
+  const [carFilterTab, setCarFilterTab] = useState("all");
+
+  const toggleCarSelection = (carId) => {
+    setFormData(prev => {
+      const exists = prev.selected_car_ids.includes(carId);
+      const newSelected = exists
+        ? prev.selected_car_ids.filter(id => id !== carId)
+        : [...prev.selected_car_ids, carId];
+      return {
+        ...prev,
+        selected_car_ids: newSelected,
+        cars_qty: newSelected.length || prev.cars_qty
+      };
+    });
+  };
+
+  const removeCarSelection = (carId) => {
+    setFormData(prev => {
+      const newSelected = prev.selected_car_ids.filter(id => id !== carId);
+      return {
+        ...prev,
+        selected_car_ids: newSelected,
+        cars_qty: newSelected.length || prev.cars_qty
+      };
+    });
+  };
+
+  const selectFirstAvailableCars = (count) => {
+    const available = cars.filter(c => c.status === "Available");
+    const chosen = available.slice(0, count).map(c => c.id);
+    setFormData(prev => ({
+      ...prev,
+      selected_car_ids: chosen,
+      cars_qty: chosen.length || count
+    }));
+  };
+
+  const clearCarSelection = () => {
+    setFormData(prev => ({
+      ...prev,
+      selected_car_ids: []
+    }));
+  };
+
+  const filteredCars = cars.filter(c => {
+    if (carFilterTab === "available" && c.status !== "Available") return false;
+    if (carFilterTab === "selected" && !formData.selected_car_ids.includes(c.id)) return false;
+    if (!carSearchQuery.trim()) return true;
+    const q = carSearchQuery.toLowerCase();
+    const mm = (c.make_model || "").toLowerCase();
+    const plate = (c.plate_number || "").toLowerCase();
+    const color = (c.color || "").toLowerCase();
+    return mm.includes(q) || plate.includes(q) || color.includes(q);
+  });
+
   useEffect(() => {
     if (isOpen) {
       setBlacklistAlert("");
@@ -490,37 +546,211 @@ export default function QuickEventBookingModal({
                 </div>
               </div>
 
-              {/* Specific Models / Available Fleet selector */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                <div>
-                  <label className="block font-semibold mb-1 text-[var(--text-main)]">Select Fleet Car(s)</label>
-                  <select
-                    multiple
-                    value={formData.selected_car_ids.map(String)}
-                    onChange={(e) => {
-                      const selected = Array.from(e.target.selectedOptions, opt => parseInt(opt.value));
-                      setFormData({ 
-                        ...formData, 
-                        selected_car_ids: selected,
-                        cars_qty: selected.length || formData.cars_qty
-                      });
-                    }}
-                    className="w-full app-input rounded-xl p-2 text-xs focus:outline-none min-h-[72px]"
-                  >
-                    {cars.map(c => (
-                      <option key={c.id} value={c.id}>
-                        {c.make_model} ({c.plate_number}) - {c.status}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="text-[10px] text-[var(--text-muted)] mt-1 block">Hold Ctrl (Windows) or Cmd (Mac) to select multiple cars.</span>
+              {/* Interactive Fleet Selection & Assignment UI */}
+              <div className="space-y-3 pt-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-bold text-[var(--text-main)] flex items-center gap-1.5">
+                      <Car className="h-4 w-4 text-teal-400" /> Assign Cars from Fleet ({formData.selected_car_ids.length} selected)
+                    </label>
+                    {formData.selected_car_ids.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={clearCarSelection}
+                        className="text-[10px] text-rose-400 hover:underline font-bold"
+                      >
+                        Clear All
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Filter tabs */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setCarFilterTab("all")}
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-lg transition-colors ${
+                        carFilterTab === "all"
+                          ? "bg-teal-500 text-white"
+                          : "bg-[var(--bg-card)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-main)]"
+                      }`}
+                    >
+                      All ({cars.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCarFilterTab("available")}
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-lg transition-colors ${
+                        carFilterTab === "available"
+                          ? "bg-emerald-500 text-white"
+                          : "bg-[var(--bg-card)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-main)]"
+                      }`}
+                    >
+                      Available ({cars.filter(c => c.status === "Available").length})
+                    </button>
+                    {formData.selected_car_ids.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setCarFilterTab("selected")}
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-lg transition-colors ${
+                          carFilterTab === "selected"
+                            ? "bg-teal-600 text-white"
+                            : "bg-[var(--bg-card)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-main)]"
+                        }`}
+                      >
+                        Selected ({formData.selected_car_ids.length})
+                      </button>
+                    )}
+                  </div>
                 </div>
 
+                {/* Search input + Quick Auto-Pick */}
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      placeholder="Search car by make, model, number plate..."
+                      value={carSearchQuery}
+                      onChange={(e) => setCarSearchQuery(e.target.value)}
+                      className="w-full app-input rounded-xl px-3 py-1.5 text-xs focus:outline-none"
+                    />
+                    {carSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setCarSearchQuery("")}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-white text-xs"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+
+                  {cars.some(c => c.status === "Available") && (
+                    <button
+                      type="button"
+                      onClick={() => selectFirstAvailableCars(parseInt(formData.cars_qty) || 1)}
+                      className="px-2.5 py-1.5 rounded-xl bg-teal-500/15 border border-teal-500/30 text-teal-400 hover:bg-teal-500/25 text-[10px] font-bold shrink-0 flex items-center gap-1 transition-all"
+                      title="Quick-pick available fleet cars based on quantity"
+                    >
+                      <Sparkles className="h-3 w-3" /> Auto-Pick {formData.cars_qty || 1} Available
+                    </button>
+                  )}
+                </div>
+
+                {/* Selected Active Chips */}
+                {formData.selected_car_ids.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 p-2 rounded-xl bg-teal-500/10 border border-teal-500/20 items-center">
+                    <span className="text-[10px] uppercase font-bold text-teal-300 tracking-wider mr-1">
+                      Assigned ({formData.selected_car_ids.length}):
+                    </span>
+                    {formData.selected_car_ids.map(id => {
+                      const car = cars.find(c => c.id === id);
+                      if (!car) return null;
+                      return (
+                        <span
+                          key={id}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-teal-500 text-white text-[11px] font-bold shadow-sm"
+                        >
+                          <span>{car.make_model}</span>
+                          <span className="font-mono text-[10px] opacity-90 font-medium">({car.plate_number})</span>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); removeCarSelection(id); }}
+                            className="hover:text-rose-200 ml-0.5 text-xs font-bold leading-none"
+                            title="Remove car"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Interactive Car Cards Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-56 overflow-y-auto pr-1 app-scrollbar">
+                  {filteredCars.length > 0 ? (
+                    filteredCars.map(car => {
+                      const isSelected = formData.selected_car_ids.includes(car.id);
+                      const isAvail = car.status === "Available";
+                      return (
+                        <div
+                          key={car.id}
+                          onClick={() => toggleCarSelection(car.id)}
+                          className={`p-2.5 rounded-xl border cursor-pointer transition-all flex items-start justify-between gap-2 text-left relative select-none ${
+                            isSelected
+                              ? "border-teal-500 bg-teal-500/15 shadow-sm shadow-teal-500/20 ring-1 ring-teal-500/50"
+                              : "border-[var(--border-color)] bg-[var(--bg-card)] hover:border-teal-500/40 hover:bg-[var(--tr-hover)]"
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-bold text-xs truncate text-[var(--text-main)]">
+                                {car.make_model}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                              <span className="font-mono font-bold text-[10px] px-1.5 py-0.2 rounded bg-black/30 text-teal-300 border border-teal-500/20">
+                                {car.plate_number}
+                              </span>
+                              {car.model_year && (
+                                <span className="text-[10px] text-[var(--text-muted)] font-medium">
+                                  {car.model_year}
+                                </span>
+                              )}
+                              {car.color && (
+                                <span className="text-[10px] text-[var(--text-muted)] capitalize">
+                                  • {car.color}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-1.5 mt-1.5">
+                              <span className={`text-[9px] font-extrabold px-1.5 py-0.2 rounded-full uppercase tracking-wider ${
+                                isAvail 
+                                  ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30" 
+                                  : "bg-amber-500/15 text-amber-400 border border-amber-500/30"
+                              }`}>
+                                {car.status}
+                              </span>
+                              {car.daily_rate && (
+                                <span className="text-[10px] font-bold text-teal-400">
+                                  PKR {Number(car.daily_rate).toLocaleString()}/d
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className={`w-5 h-5 rounded-lg border flex items-center justify-center shrink-0 transition-all ${
+                            isSelected
+                              ? "bg-teal-500 border-teal-400 text-white shadow-sm"
+                              : "border-[var(--border-color)] bg-[var(--bg-app)] text-transparent"
+                          }`}>
+                            <Check className="h-3.5 w-3.5 stroke-[3]" />
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="col-span-full p-4 rounded-xl border border-dashed border-[var(--border-color)] text-center text-xs text-[var(--text-muted)]">
+                      {cars.length === 0 ? (
+                        <span>No vehicles currently registered in agency fleet. You can specify custom cars in the notes box below.</span>
+                      ) : (
+                        <span>No cars match the filter "{carSearchQuery}". Try clearing search.</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Custom Notes / Specific Models */}
                 <div>
-                  <label className="block font-semibold mb-1 text-[var(--text-main)]">Custom Car Notes / Model Specifics</label>
+                  <label className="block font-semibold mb-1 text-[11px] text-[var(--text-main)]">
+                    Custom Outsourced Fleet / Model Specifics Notes (Optional)
+                  </label>
                   <textarea
-                    rows="3"
-                    placeholder="e.g. 1x Black Prado for Groom, 2x White Yaris for Family"
+                    rows="2"
+                    placeholder="e.g. 1x Black Prado for Groom, 2x White Yaris for Family, 1x Grand Cabin Hiace"
                     value={formData.car_models_note}
                     onChange={(e) => setFormData({ ...formData, car_models_note: e.target.value })}
                     className="w-full app-input rounded-xl p-2.5 text-xs focus:outline-none resize-none"
