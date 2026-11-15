@@ -1205,7 +1205,7 @@ def create_quick_event_booking(
         "booking_id": db_booking.id,
         "booking": {
             "id": db_booking.id,
-            "customer_name": customer.name,
+            "customer_name": customer.full_name,
             "customer_phone": customer.phone_primary,
             "customer_cnic": customer.cnic_number,
             "event_timing": db_booking.event_timing,
