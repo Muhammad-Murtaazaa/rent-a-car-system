@@ -1127,7 +1127,21 @@ def create_quick_event_booking(
             if any_car:
                 selected_car_ids = [any_car.id]
             else:
-                raise HTTPException(status_code=400, detail="No cars available in fleet to book.")
+                # Auto-create an event fleet vehicle entry for this tenant so the booking proceeds seamlessly
+                fleet_car = models.Car(
+                    tenant_id=tenant_id,
+                    plate_number=f"EVT-{datetime.now().strftime('%y%m%d%H%M%S')}",
+                    make_model=payload.car_models_note or "Event Fleet / Multi-Car",
+                    model_year=datetime.now().year,
+                    color="White",
+                    engine_cc=1800,
+                    current_odometer=0,
+                    transmission_type="Auto",
+                    status="Rented"
+                )
+                db.add(fleet_car)
+                db.flush()
+                selected_car_ids = [fleet_car.id]
 
     booked_cars_list = [
         schemas.BookedCarCreate(
