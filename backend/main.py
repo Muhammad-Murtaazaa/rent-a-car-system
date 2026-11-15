@@ -1136,21 +1136,23 @@ def create_quick_event_booking(
         for cid in selected_car_ids
     ]
 
-    duration_days = max(1, (payload.expected_end_datetime.date() - payload.start_datetime.date()).days or 1)
+    start_dt = payload.start_datetime or datetime.now()
+    end_dt = payload.expected_end_datetime or (start_dt + timedelta(days=1))
+    duration_days = max(1, (end_dt.date() - start_dt.date()).days or 1)
     daily_rate_total = payload.total_rent / duration_days
 
     # 4. Create booking
     booking_schema = schemas.BookingCreate(
         customer_id=customer.id,
-        start_datetime=payload.start_datetime,
-        expected_end_datetime=payload.expected_end_datetime,
+        start_datetime=start_dt,
+        expected_end_datetime=end_dt,
         daily_rate=daily_rate_total,
         is_chauffeur_driven=payload.is_chauffeur_driven or False,
         chauffeur_daily_wage=0.0,
         security_deposit_amount=payload.security_deposit_amount or 0.0,
         security_deposit_type=payload.security_deposit_type or "Cash",
         security_deposit_status="Held" if (payload.security_deposit_amount or 0) > 0 else "N/A",
-        status="Active" if payload.start_datetime <= datetime.now() else "Reserved",
+        status="Active" if start_dt <= datetime.now() else "Reserved",
         booking_type="Event / Multi-Car",
         specific_days_notes=payload.car_models_note or "",
         destination=payload.destination,

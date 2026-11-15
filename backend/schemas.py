@@ -192,8 +192,8 @@ class QuickEventBookingRequest(BaseModel):
     phone: str
     cnic: str
     event_date: Optional[str] = None
-    start_datetime: datetime
-    expected_end_datetime: datetime
+    start_datetime: Optional[datetime] = None
+    expected_end_datetime: Optional[datetime] = None
     event_timing: Optional[str] = None
     destination: Optional[str] = None
     pickup_location: Optional[str] = None
