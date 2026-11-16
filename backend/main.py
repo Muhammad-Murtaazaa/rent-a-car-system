@@ -47,8 +47,10 @@ def ensure_sqlite_columns():
             ("registration_expiry_date", "DATE"),
             ("investor_id", "INTEGER"),
             ("investor_profit_share", "FLOAT"),
+            ("investor_profit_share_type", "VARCHAR"),
             ("shareholder_id", "INTEGER"),
             ("shareholder_profit_share", "FLOAT"),
+            ("shareholder_profit_share_type", "VARCHAR"),
         ],
         "customers": [
             ("license_expiry_date", "DATE"),
@@ -72,6 +74,7 @@ def ensure_sqlite_columns():
             ("driver_name", "VARCHAR"),
             ("driver_phone", "VARCHAR"),
             ("driver_cnic", "VARCHAR"),
+            ("driver_license", "VARCHAR"),
             ("billable_days", "INTEGER"),
             ("specific_days_notes", "VARCHAR"),
             ("late_penalty_charge", "FLOAT DEFAULT 0.0"),
@@ -861,17 +864,26 @@ def get_car_history(
     partner_earnings = 0.0
     platform_fee = 0.0
 
+    partner_share_type = "percentage"
     if car.investor_id:
         owner_type = "Investor"
         owner_name = car.investor.full_name if car.investor else "Unknown"
         partner_share = car.investor_profit_share if car.investor_profit_share is not None else (car.investor.profit_share_percentage if car.investor else 70.0)
-        partner_earnings = max(0.0, net_profit) * (partner_share / 100.0)
+        partner_share_type = car.investor_profit_share_type or "percentage"
+        if car.investor_profit_share is not None:
+            partner_earnings = crud._partner_car_earnings(car.investor_profit_share, partner_share_type, net_profit)
+        else:
+            partner_earnings = max(0.0, net_profit) * (partner_share / 100.0)
     elif car.shareholder_id:
         owner_type = "Shareholder"
         owner_name = car.shareholder.full_name if car.shareholder else "Unknown"
         partner_share = car.shareholder_profit_share if car.shareholder_profit_share is not None else (car.shareholder.share_percentage if car.shareholder else 50.0)
+        partner_share_type = car.shareholder_profit_share_type or "percentage"
         platform_fee = total_earnings * 0.15
-        partner_earnings = max(0.0, total_earnings * 0.85) * (partner_share / 100.0)
+        if car.shareholder_profit_share is not None:
+            partner_earnings = crud._partner_car_earnings(car.shareholder_profit_share, partner_share_type, total_earnings * 0.85)
+        else:
+            partner_earnings = max(0.0, total_earnings * 0.85) * (partner_share / 100.0)
     
     # 4. Data Masking for desk_staff
     if False:  # Disabled to show history and info to everyone
@@ -952,6 +964,7 @@ def get_car_history(
             "owner_type": owner_type,
             "owner_name": owner_name,
             "partner_share": partner_share,
+            "partner_share_type": partner_share_type,
             "partner_earnings": partner_earnings,
             "platform_fee": platform_fee
         },

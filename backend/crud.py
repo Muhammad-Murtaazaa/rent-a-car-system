@@ -44,7 +44,33 @@ def get_car_by_plate(db: Session, plate_number: str, tenant_id: str):
 def get_cars(db: Session, tenant_id: str, skip: int = 0, limit: int = 10000):
     return db.query(models.Car).filter(models.Car.tenant_id == tenant_id).offset(skip).limit(limit).all()
 
+def _validate_partner_share(share, share_type, label: str):
+    """A percentage share above 100 is always a mistake (operators were
+    typing fixed PKR amounts like 75000 into the % field). Fixed-amount
+    shares may be any non-negative amount."""
+    if share is None:
+        return
+    if (share_type or "percentage") == "percentage" and float(share) > 100:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{label} profit share is set to Percentage — {share:g} exceeds 100%. "
+                   "If that figure is a PKR amount, switch the share type to Fixed Amount.",
+        )
+
+
+def _partner_car_earnings(share, share_type, base_amount: float) -> float:
+    """Partner earnings for one car: a fixed share pays the flat PKR
+    amount; a percentage share pays that % of the base (net profit for
+    investors, post-platform-fee shareable amount for shareholders)."""
+    if share is not None and (share_type or "percentage") == "fixed":
+        return max(0.0, float(share))
+    rate = float(share) if share is not None else 0.0
+    return max(0.0, base_amount) * (rate / 100.0)
+
+
 def create_car(db: Session, car: schemas.CarCreate, tenant_id: str):
+    _validate_partner_share(car.investor_profit_share, car.investor_profit_share_type, "Investor")
+    _validate_partner_share(car.shareholder_profit_share, car.shareholder_profit_share_type, "Shareholder")
     db_car = models.Car(**car.dict(), tenant_id=tenant_id)
     db.add(db_car)
     db.commit()
@@ -56,6 +82,18 @@ def update_car(db: Session, car_id: int, car_update: schemas.CarUpdate, tenant_i
     if not db_car:
         return None
     payload = car_update.dict(exclude_unset=True)
+    if "investor_profit_share" in payload or "investor_profit_share_type" in payload:
+        _validate_partner_share(
+            payload.get("investor_profit_share", db_car.investor_profit_share),
+            payload.get("investor_profit_share_type", db_car.investor_profit_share_type),
+            "Investor",
+        )
+    if "shareholder_profit_share" in payload or "shareholder_profit_share_type" in payload:
+        _validate_partner_share(
+            payload.get("shareholder_profit_share", db_car.shareholder_profit_share),
+            payload.get("shareholder_profit_share_type", db_car.shareholder_profit_share_type),
+            "Shareholder",
+        )
     # Duplicate plate on update used to crash with a 500 (UNIQUE constraint);
     # create returns a clean 400 for the same case - mirror it here.
     if payload.get("plate_number"):
@@ -674,9 +712,13 @@ def get_investor_financial_summary(db: Session, investor_id: int, tenant_id: str
 
         net_profit = revenue - maint_cost
         
-        # Share rate: fallback to investor rate if car specific rate not set
-        share_rate = car.investor_profit_share if car.investor_profit_share is not None else db_investor.profit_share_percentage
-        investor_car_earnings = max(0.0, net_profit) * (share_rate / 100.0)
+        # Share: per-car value wins; a "fixed" type pays the flat PKR
+        # amount, otherwise it's a % of net profit (fallback to the
+        # investor-level rate when the car has none of its own).
+        if car.investor_profit_share is not None:
+            investor_car_earnings = _partner_car_earnings(car.investor_profit_share, car.investor_profit_share_type, net_profit)
+        else:
+            investor_car_earnings = max(0.0, net_profit) * (float(db_investor.profit_share_percentage or 0) / 100.0)
 
         tot_revenue += revenue
         tot_maint += maint_cost
@@ -862,9 +904,13 @@ def get_shareholder_financial_summary(db: Session, shareholder_id: int, tenant_i
         platform_fee = revenue * 0.15
         shareable_amount = revenue * 0.85
 
-        # Share rate
-        share_rate = car.shareholder_profit_share if car.shareholder_profit_share is not None else db_shareholder.share_percentage
-        shareholder_car_earnings = max(0.0, shareable_amount) * (share_rate / 100.0)
+        # Share: per-car value wins; "fixed" pays the flat PKR amount,
+        # otherwise a % of the post-fee shareable amount (fallback to
+        # the shareholder-level rate when the car has none of its own).
+        if car.shareholder_profit_share is not None:
+            shareholder_car_earnings = _partner_car_earnings(car.shareholder_profit_share, car.shareholder_profit_share_type, shareable_amount)
+        else:
+            shareholder_car_earnings = max(0.0, shareable_amount) * (float(db_shareholder.share_percentage or 0) / 100.0)
 
         tot_revenue += revenue
         tot_maint += maint_cost

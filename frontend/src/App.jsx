@@ -222,7 +222,7 @@ export default function App() {
     daily_rate: 3000, is_chauffeur_driven: false, chauffeur_daily_wage: 1500,
     security_deposit_amount: 10000, security_deposit_type: "Cash", security_deposit_status: "Held",
     booking_type: "Individual", company_name: "", booked_cars: [],
-    driver_type: "Company Driver", driver_name: "", driver_phone: "", driver_cnic: "",
+    driver_type: "Company Driver", driver_name: "", driver_phone: "", driver_cnic: "", driver_license: "",
     billable_days: "", specific_days_notes: ""
   });
 
@@ -2009,8 +2009,8 @@ function FleetView({
     status: "Available", last_oil_change_odometer: 0, image_url: "",
     registration_doc_url: "", fitness_cert_url: "", token_tax_doc_url: "",
     fitness_expiry_date: "", token_tax_expiry_date: "", registration_expiry_date: "",
-    ownership_type: "Company", investor_id: "", investor_profit_share: "",
-    shareholder_id: "", shareholder_profit_share: ""
+    ownership_type: "Company", investor_id: "", investor_profit_share: "", investor_profit_share_type: "percentage",
+    shareholder_id: "", shareholder_profit_share: "", shareholder_profit_share_type: "percentage"
   };
   const [form, setForm] = useState(emptyCarForm);
 
@@ -2033,8 +2033,10 @@ function FleetView({
         ownership_type,
         investor_id: editingCar.investor_id || "",
         investor_profit_share: editingCar.investor_profit_share || "",
+        investor_profit_share_type: editingCar.investor_profit_share_type || "percentage",
         shareholder_id: editingCar.shareholder_id || "",
-        shareholder_profit_share: editingCar.shareholder_profit_share || ""
+        shareholder_profit_share: editingCar.shareholder_profit_share || "",
+        shareholder_profit_share_type: editingCar.shareholder_profit_share_type || "percentage"
       });
     } else {
       setForm({ ...emptyCarForm });
@@ -2075,8 +2077,10 @@ function FleetView({
       registration_expiry_date: form.registration_expiry_date || null,
       investor_id: form.ownership_type === "Investor" ? (parseInt(form.investor_id, 10) || null) : null,
       investor_profit_share: form.ownership_type === "Investor" ? (parseFloat(form.investor_profit_share) || null) : null,
+      investor_profit_share_type: form.ownership_type === "Investor" ? (form.investor_profit_share_type || "percentage") : null,
       shareholder_id: form.ownership_type === "Shareholder" ? (parseInt(form.shareholder_id, 10) || null) : null,
       shareholder_profit_share: form.ownership_type === "Shareholder" ? (parseFloat(form.shareholder_profit_share) || null) : null,
+      shareholder_profit_share_type: form.ownership_type === "Shareholder" ? (form.shareholder_profit_share_type || "percentage") : null,
     };
     delete payload.ownership_type;
 
@@ -2506,10 +2510,12 @@ function FleetView({
                         onChange={(e) => {
                           const selectedId = parseInt(e.target.value, 10);
                           const inv = investors.find(i => (i.investor_id || i.id) === selectedId);
+                          const invFixed = inv && inv.payout_type === "fixed";
                           setForm({
                             ...form,
                             investor_id: selectedId,
-                            investor_profit_share: inv ? inv.profit_share_percentage : 70.0
+                            investor_profit_share_type: invFixed ? "fixed" : "percentage",
+                            investor_profit_share: inv ? (invFixed ? (inv.fixed_amount ?? "") : inv.profit_share_percentage) : 70.0
                           });
                         }}
                         className="w-full app-input rounded-lg p-2.5 focus:outline-none"
@@ -2531,10 +2537,12 @@ function FleetView({
                         onChange={(e) => {
                           const selectedId = parseInt(e.target.value, 10);
                           const sh = shareholders.find(s => (s.shareholder_id || s.id) === selectedId);
+                          const shFixed = sh && sh.payout_type === "fixed";
                           setForm({
                             ...form,
                             shareholder_id: selectedId,
-                            shareholder_profit_share: sh ? sh.share_percentage : 50.0
+                            shareholder_profit_share_type: shFixed ? "fixed" : "percentage",
+                            shareholder_profit_share: sh ? (shFixed ? (sh.fixed_amount ?? "") : sh.share_percentage) : 50.0
                           });
                         }}
                         className="w-full app-input rounded-lg p-2.5 focus:outline-none"
@@ -2550,25 +2558,47 @@ function FleetView({
 
                 {form.ownership_type === "Investor" && (
                   <div>
-                    <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Investor Profit Share (%) *</label>
-                    <input 
-                      type="number" step="0.1" min="0" max="100" required
-                      value={form.investor_profit_share}
-                      onChange={(e) => setForm({...form, investor_profit_share: parseFloat(e.target.value) || 0})}
-                      className="w-full app-input rounded-lg p-2.5"
-                    />
+                    <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Investor Profit Share *</label>
+                    <div className="flex gap-2">
+                      <select
+                        value={form.investor_profit_share_type || "percentage"}
+                        onChange={(e) => setForm({...form, investor_profit_share_type: e.target.value})}
+                        className="app-input rounded-lg p-2.5 w-[45%] focus:outline-none"
+                      >
+                        <option value="percentage">Percentage (%)</option>
+                        <option value="fixed">Fixed Amount (PKR)</option>
+                      </select>
+                      <input
+                        type="number" step="0.1" min="0" max={form.investor_profit_share_type === "fixed" ? undefined : 100} required
+                        value={form.investor_profit_share}
+                        onChange={(e) => setForm({...form, investor_profit_share: parseFloat(e.target.value) || 0})}
+                        className="w-full app-input rounded-lg p-2.5"
+                        placeholder={form.investor_profit_share_type === "fixed" ? "e.g. 75000" : "e.g. 70"}
+                      />
+                    </div>
                   </div>
                 )}
 
                 {form.ownership_type === "Shareholder" && (
                   <div>
-                    <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Shareholder Cut / Share (%) *</label>
-                    <input 
-                      type="number" step="0.1" min="0" max="100" required
-                      value={form.shareholder_profit_share}
-                      onChange={(e) => setForm({...form, shareholder_profit_share: parseFloat(e.target.value) || 0})}
-                      className="w-full app-input rounded-lg p-2.5"
-                    />
+                    <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Shareholder Cut / Share *</label>
+                    <div className="flex gap-2">
+                      <select
+                        value={form.shareholder_profit_share_type || "percentage"}
+                        onChange={(e) => setForm({...form, shareholder_profit_share_type: e.target.value})}
+                        className="app-input rounded-lg p-2.5 w-[45%] focus:outline-none"
+                      >
+                        <option value="percentage">Percentage (%)</option>
+                        <option value="fixed">Fixed Amount (PKR)</option>
+                      </select>
+                      <input
+                        type="number" step="0.1" min="0" max={form.shareholder_profit_share_type === "fixed" ? undefined : 100} required
+                        value={form.shareholder_profit_share}
+                        onChange={(e) => setForm({...form, shareholder_profit_share: parseFloat(e.target.value) || 0})}
+                        className="w-full app-input rounded-lg p-2.5"
+                        placeholder={form.shareholder_profit_share_type === "fixed" ? "e.g. 75000" : "e.g. 50"}
+                      />
+                    </div>
                   </div>
                 )}
               </div>
@@ -3510,6 +3540,7 @@ function BookingsView({
       driver_name: b.driver_name || "",
       driver_phone: b.driver_phone || "",
       driver_cnic: b.driver_cnic || "",
+      driver_license: b.driver_license || "",
       billable_days: b.billable_days !== null && b.billable_days !== undefined ? b.billable_days : "",
       specific_days_notes: b.specific_days_notes || ""
     });
@@ -3749,6 +3780,7 @@ function BookingsView({
       driver_name: form.driver_type === "Freelance Driver" ? form.driver_name : null,
       driver_phone: form.driver_type === "Freelance Driver" ? form.driver_phone : null,
       driver_cnic: form.driver_type === "Freelance Driver" ? form.driver_cnic : null,
+      driver_license: form.driver_type === "Freelance Driver" ? form.driver_license : null,
       billable_days: billableDaysVal,
       specific_days_notes: form.specific_days_notes || ""
     };
@@ -4178,6 +4210,7 @@ function BookingsView({
               driver_name: "",
               driver_phone: "",
               driver_cnic: "",
+              driver_license: "",
               billable_days: "",
               specific_days_notes: ""
             });
@@ -4769,7 +4802,7 @@ function BookingsView({
                   <span className="font-semibold text-[var(--text-main)]">
                     {selectedBooking.is_chauffeur_driven 
                       ? (selectedBooking.driver_type === "Freelance Driver"
-                          ? `Freelance: ${selectedBooking.driver_name || "Driver"}${selectedBooking.driver_phone ? ` (${selectedBooking.driver_phone})` : ""} · PKR ${selectedBooking.chauffeur_daily_wage}/d`
+                          ? `Freelance: ${selectedBooking.driver_name || "Driver"}${selectedBooking.driver_phone ? ` (${selectedBooking.driver_phone})` : ""}${selectedBooking.driver_license ? ` · Licence ${selectedBooking.driver_license}` : ""} · PKR ${selectedBooking.chauffeur_daily_wage}/d`
                           : `Staff Driver (PKR ${selectedBooking.chauffeur_daily_wage}/d)`)
                       : "Self Driven"}
                   </span>
@@ -5347,15 +5380,27 @@ function BookingsView({
                               />
                             </div>
                           </div>
-                          <div>
-                            <label className="block text-[10px] font-semibold text-[var(--text-muted)] mb-1">Freelance Driver CNIC</label>
-                            <input
-                              type="text"
-                              placeholder="35201xxxxxxx"
-                              value={form.driver_cnic || ""}
-                              onChange={(e) => setForm({ ...form, driver_cnic: e.target.value })}
-                              className="w-full app-input rounded-lg p-2 text-xs font-mono"
-                            />
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-[10px] font-semibold text-[var(--text-muted)] mb-1">Freelance Driver CNIC</label>
+                              <input
+                                type="text"
+                                placeholder="35201xxxxxxx"
+                                value={form.driver_cnic || ""}
+                                onChange={(e) => setForm({ ...form, driver_cnic: e.target.value })}
+                                className="w-full app-input rounded-lg p-2 text-xs font-mono"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-semibold text-[var(--text-muted)] mb-1">Freelance Driver Licence No</label>
+                              <input
+                                type="text"
+                                placeholder="e.g. LHR-2024-12345"
+                                value={form.driver_license || ""}
+                                onChange={(e) => setForm({ ...form, driver_license: e.target.value })}
+                                className="w-full app-input rounded-lg p-2 text-xs font-mono"
+                              />
+                            </div>
                           </div>
                         </div>
                       )}
@@ -5395,7 +5440,8 @@ function BookingsView({
                   >
                     <option value="Cash">Cash</option>
                     <option value="Cheque">Cheque</option>
-                    <option value="Token/Item">Token/Item</option>
+                    <option value="Bank Transfer">Bank Transfer</option>
+                    <option value="Name">Name</option>
                   </select>
                 </div>
                 <div>

@@ -27,8 +27,12 @@ class Car(Base):
     registration_expiry_date = Column(Date, nullable=True)
     investor_id = Column(Integer, ForeignKey("investors.id"), nullable=True)
     investor_profit_share = Column(Float, nullable=True)
+    # "percentage" (share of net profit) or "fixed" (flat PKR amount) —
+    # mirrors the investor-level payout_type choice, per car.
+    investor_profit_share_type = Column(String, nullable=True, default="percentage")
     shareholder_id = Column(Integer, ForeignKey("shareholders.id"), nullable=True)
     shareholder_profit_share = Column(Float, nullable=True)
+    shareholder_profit_share_type = Column(String, nullable=True, default="percentage")
 
     bookings = relationship("Booking", back_populates="car")
     maintenance_logs = relationship("MaintenanceLog", back_populates="car")
@@ -120,6 +124,7 @@ class Booking(Base):
     driver_name = Column(String, nullable=True)
     driver_phone = Column(String, nullable=True)
     driver_cnic = Column(String, nullable=True)
+    driver_license = Column(String, nullable=True)
     billable_days = Column(Integer, nullable=True)
     specific_days_notes = Column(String, nullable=True)
     late_penalty_charge = Column(Float, nullable=True, default=0.0)

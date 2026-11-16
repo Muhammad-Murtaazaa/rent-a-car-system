@@ -22,9 +22,11 @@ class CarBase(BaseModel):
     token_tax_expiry_date: Optional[date] = None
     registration_expiry_date: Optional[date] = None
     investor_id: Optional[int] = None
-    investor_profit_share: Optional[float] = None
+    investor_profit_share: Optional[float] = Field(None, ge=0)
+    investor_profit_share_type: Optional[str] = "percentage"  # percentage | fixed
     shareholder_id: Optional[int] = None
-    shareholder_profit_share: Optional[float] = None
+    shareholder_profit_share: Optional[float] = Field(None, ge=0)
+    shareholder_profit_share_type: Optional[str] = "percentage"  # percentage | fixed
 
 class CarCreate(CarBase):
     pass
@@ -48,9 +50,11 @@ class CarUpdate(BaseModel):
     token_tax_expiry_date: Optional[date] = None
     registration_expiry_date: Optional[date] = None
     investor_id: Optional[int] = None
-    investor_profit_share: Optional[float] = None
+    investor_profit_share: Optional[float] = Field(None, ge=0)
+    investor_profit_share_type: Optional[str] = None  # percentage | fixed
     shareholder_id: Optional[int] = None
-    shareholder_profit_share: Optional[float] = None
+    shareholder_profit_share: Optional[float] = Field(None, ge=0)
+    shareholder_profit_share_type: Optional[str] = None  # percentage | fixed
 
 class Car(CarBase):
     id: int
@@ -174,7 +178,7 @@ class BookingBase(BaseModel):
     is_chauffeur_driven: bool = False
     chauffeur_daily_wage: float = Field(0.0, ge=0)
     security_deposit_amount: float = Field(0.0, ge=0)
-    security_deposit_type: str  # Cash, Cheque, Token/Item
+    security_deposit_type: str  # Cash, Cheque, Bank Transfer, Name
     security_deposit_status: str = "Held"  # Held, Refunded, Withheld
     status: str = "Active"  # Active, Reserved, Completed, Cancelled
     booking_type: Optional[str] = "Individual"  # Individual, Company
@@ -183,6 +187,7 @@ class BookingBase(BaseModel):
     driver_name: Optional[str] = None
     driver_phone: Optional[str] = None
     driver_cnic: Optional[str] = None
+    driver_license: Optional[str] = None
     billable_days: Optional[int] = None
     specific_days_notes: Optional[str] = None
     late_penalty_charge: Optional[float] = Field(0.0, ge=0)
@@ -266,6 +271,7 @@ class BookingUpdate(BaseModel):
     driver_name: Optional[str] = None
     driver_phone: Optional[str] = None
     driver_cnic: Optional[str] = None
+    driver_license: Optional[str] = None
     billable_days: Optional[int] = None
     specific_days_notes: Optional[str] = None
     late_penalty_charge: Optional[float] = Field(None, ge=0)
