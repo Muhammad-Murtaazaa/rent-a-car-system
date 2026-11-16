@@ -709,6 +709,8 @@ class QuotationBase(BaseModel):
     chauffeur_daily_rate: float = Field(0.0, ge=0)
     discount_amount: float = Field(0.0, ge=0)
     tax_percentage: float = Field(0.0, ge=0, le=100)
+    tax_type: str = "percentage"  # percentage | fixed
+    tax_amount: float = Field(0.0, ge=0)
     total_amount: float = 0.0
     valid_until: Optional[date] = None
     status: str = "Draft"
@@ -739,6 +741,8 @@ class QuotationUpdate(BaseModel):
     chauffeur_daily_rate: Optional[float] = Field(None, ge=0)
     discount_amount: Optional[float] = Field(None, ge=0)
     tax_percentage: Optional[float] = Field(None, ge=0, le=100)
+    tax_type: Optional[str] = None  # percentage | fixed
+    tax_amount: Optional[float] = Field(None, ge=0)
     total_amount: Optional[float] = None
     valid_until: Optional[date] = None
     status: Optional[str] = None

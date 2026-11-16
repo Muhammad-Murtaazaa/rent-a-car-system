@@ -294,9 +294,10 @@ export async function generateVehiclesQuotationPDF(q, branding) {
   // total at all, although the app computes one. Same math as QuotationsView.
   const itemsTotal = items.reduce((s, it) => s + (Number(it.amount) || 0), 0);
   const discount = Number(q.discount_amount) || 0;
-  const taxPct = Number(q.tax_percentage) || 0;
+  const isFixedTax = q.tax_type === "fixed";
+  const taxPct = isFixedTax ? 0 : (Number(q.tax_percentage) || 0);
   const subAfterDiscount = Math.max(0, itemsTotal - discount);
-  const taxVal = Math.round(subAfterDiscount * (taxPct / 100));
+  const taxVal = isFixedTax ? (Number(q.tax_amount) || 0) : Math.round(subAfterDiscount * (taxPct / 100));
   const grandTotal = Number(q.total_amount) > 0 ? Number(q.total_amount) : subAfterDiscount + taxVal;
   y += 6;
   doc.setFontSize(10.5);
@@ -309,7 +310,7 @@ export async function generateVehiclesQuotationPDF(q, branding) {
   };
   totalRow("Subtotal:", itemsTotal);
   if (discount > 0) totalRow("Discount:", -discount);
-  if (taxPct > 0) totalRow(`Tax (${taxPct}%):`, taxVal);
+  if (isFixedTax ? taxVal > 0 : taxPct > 0) totalRow(isFixedTax ? "Tax:" : `Tax (${taxPct}%):`, taxVal);
   doc.setDrawColor(r, g, b);
   doc.setLineWidth(0.6);
   doc.line(104, y - 4, 192, y - 4);

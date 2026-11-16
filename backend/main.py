@@ -110,6 +110,8 @@ def ensure_sqlite_columns():
         ],
         "quotations": [
             ("items", "JSON"),
+            ("tax_type", "VARCHAR DEFAULT 'percentage'"),
+            ("tax_amount", "FLOAT DEFAULT 0.0"),
         ],
         "financials": [
             ("receipt_id", "INTEGER"),

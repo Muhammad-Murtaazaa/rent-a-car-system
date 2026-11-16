@@ -339,6 +339,10 @@ class Quotation(Base):
     chauffeur_daily_rate = Column(Float, nullable=False, default=0.0)
     discount_amount = Column(Float, nullable=False, default=0.0)
     tax_percentage = Column(Float, nullable=False, default=0.0)
+    # Tax can be a percentage of the discounted subtotal or a fixed PKR
+    # amount (tax_amount holds the applied PKR tax in both cases).
+    tax_type = Column(String, nullable=False, default="percentage")
+    tax_amount = Column(Float, nullable=False, default=0.0)
     total_amount = Column(Float, nullable=False, default=0.0)
     valid_until = Column(Date, nullable=True)
     status = Column(String, nullable=False, default="Draft")  # Draft, Sent, Accepted, Expired, Converted

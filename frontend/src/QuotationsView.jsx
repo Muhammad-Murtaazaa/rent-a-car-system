@@ -42,6 +42,8 @@ export default function QuotationsView({
     chauffeur_daily_rate: 1500,
     discount_amount: 0,
     tax_percentage: 0,
+    tax_type: "percentage",
+    tax_amount: 0,
     valid_until: nextWeek,
     status: "Draft",
     items: [{ name: "", days_label: "Per Day", amount: "" }],
@@ -85,6 +87,8 @@ export default function QuotationsView({
         chauffeur_daily_rate: editingQuote.chauffeur_daily_rate || 0,
         discount_amount: editingQuote.discount_amount || 0,
         tax_percentage: editingQuote.tax_percentage || 0,
+        tax_type: editingQuote.tax_type || "percentage",
+        tax_amount: editingQuote.tax_amount || 0,
         valid_until: editingQuote.valid_until ? String(editingQuote.valid_until).slice(0, 10) : nextWeek,
         status: editingQuote.status || "Draft",
         items: existingItems,
@@ -129,9 +133,10 @@ export default function QuotationsView({
 
   const itemsTotal = (form.items || []).reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
   const discountVal = parseFloat(form.discount_amount) || 0;
-  const taxPct = parseFloat(form.tax_percentage) || 0;
+  const isFixedTax = (form.tax_type || "percentage") === "fixed";
+  const taxPct = isFixedTax ? 0 : (parseFloat(form.tax_percentage) || 0);
   const subAfterDiscount = Math.max(0, itemsTotal - discountVal);
-  const taxVal = Math.round(subAfterDiscount * (taxPct / 100));
+  const taxVal = isFixedTax ? (parseFloat(form.tax_amount) || 0) : Math.round(subAfterDiscount * (taxPct / 100));
   const finalGrandTotal = subAfterDiscount + taxVal;
 
   const handleSubmit = async (e) => {
@@ -167,6 +172,8 @@ export default function QuotationsView({
       daily_rate: Math.round((itemsTotal / parsedDays) * 100) / 100,
       discount_amount: discountVal,
       tax_percentage: taxPct,
+      tax_type: form.tax_type || "percentage",
+      tax_amount: taxVal,
       total_amount: finalGrandTotal,
       items: validItems,
       valid_until: form.valid_until || null
@@ -601,16 +608,28 @@ export default function QuotationsView({
                   />
                 </div>
                 <div>
-                  <label className="block font-semibold text-[var(--text-muted)] mb-1">Tax (%)</label>
-                  <input 
-                    type="number" 
-                    min="0" 
-                    max="100" 
-                    placeholder="0"
-                    value={form.tax_percentage} 
-                    onChange={e => setForm({ ...form, tax_percentage: e.target.value })} 
-                    className="w-full app-input rounded-xl p-2.5 font-mono" 
-                  />
+                  <label className="block font-semibold text-[var(--text-muted)] mb-1">Tax</label>
+                  <div className="flex gap-2">
+                    <select
+                      value={form.tax_type || "percentage"}
+                      onChange={e => setForm({ ...form, tax_type: e.target.value })}
+                      className="app-input rounded-xl p-2.5 w-[48%] focus:outline-none"
+                    >
+                      <option value="percentage">Percentage (%)</option>
+                      <option value="fixed">Fixed Amount (PKR)</option>
+                    </select>
+                    <input
+                      type="number"
+                      min="0"
+                      max={(form.tax_type || "percentage") === "fixed" ? undefined : 100}
+                      placeholder="0"
+                      value={(form.tax_type || "percentage") === "fixed" ? form.tax_amount : form.tax_percentage}
+                      onChange={e => (form.tax_type || "percentage") === "fixed"
+                        ? setForm({ ...form, tax_amount: e.target.value })
+                        : setForm({ ...form, tax_percentage: e.target.value })}
+                      className="w-full app-input rounded-xl p-2.5 font-mono"
+                    />
+                  </div>
                 </div>
                 <div className="p-3 rounded-2xl bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-teal-500/10 border border-amber-500/30 flex flex-col justify-center text-right">
                   <span className="text-[10px] font-bold uppercase text-amber-500 block">Final Quoted Total</span>
