@@ -1,5 +1,6 @@
 import os
 import shutil
+import subprocess
 import time
 import uuid
 import json
@@ -311,15 +312,47 @@ def caddy_check_domain(domain: str = Query(...), db: Session = Depends(get_db)):
 
     raise HTTPException(status_code=404, detail="Domain not authorized for on-demand TLS")
 
+def reload_caddy() -> bool:
+    """
+    Reload Caddy so a newly written tenants.caddy takes effect.
+    Returns True on success. The old code ran
+    `os.system("caddy reload ... >/dev/null 2>&1")`, which discarded the
+    exit code and stderr — so when the reload failed in the app's service
+    context (2026-11-16: My Car Inc's subdomain served Cloudflare 525 until
+    the same command was run manually as root), nothing logged it and the
+    tenant looked provisioned while its subdomain was dead. This version
+    resolves the binary by absolute path (the service's PATH may not
+    include it), captures the output, and logs failures loudly.
+    """
+    caddy_bin = shutil.which("caddy") or "/usr/bin/caddy"
+    try:
+        result = subprocess.run(
+            [caddy_bin, "reload", "--config", "/etc/caddy/Caddyfile"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        print(f"[CaddySync] reload failed to run ({caddy_bin}): {e}")
+        return False
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        print(f"[CaddySync] reload failed (exit {result.returncode}): {detail}")
+        return False
+    print("[CaddySync] reload ok")
+    return True
+
+
 def sync_caddy_tenants(db: Session):
     """
     Automatically writes all active tenant subdomains to /etc/caddy/tenants.caddy
     and reloads Caddy with zero downtime so every tenant subdomain is instantly live.
+    Returns True when the reload succeeded (or there is no Caddy to reload,
+    e.g. local dev), False when the reload failed — callers should treat a
+    False as "tenant created, subdomain not live yet" and surface it.
     """
     try:
         caddy_dir = "/etc/caddy"
         if not os.path.exists(caddy_dir):
-            return
+            return True
         tenants = db.query(models.Tenant).filter(models.Tenant.id != "default", models.Tenant.is_active == True).all()
         blocks = []
         for t in tenants:
@@ -329,9 +362,10 @@ def sync_caddy_tenants(db: Session):
         caddy_path = os.path.join(caddy_dir, "tenants.caddy")
         with open(caddy_path, "w") as f:
             f.write(content + "\n")
-        os.system("caddy reload --config /etc/caddy/Caddyfile >/dev/null 2>&1")
+        return reload_caddy()
     except Exception as e:
         print("[CaddySync] Error:", e)
+        return False
 
 @app.on_event("startup")
 def startup_event():
