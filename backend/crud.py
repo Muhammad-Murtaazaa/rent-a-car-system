@@ -741,7 +741,17 @@ def get_investor_financial_summary(db: Session, investor_id: int, tenant_id: str
     tot_payouts = sum(p.amount for p in payouts)
     effective_payout_type = getattr(db_investor, "payout_type", "percentage") or "percentage"
     effective_fixed_amount = float(getattr(db_investor, "fixed_amount", 0.0) or 0.0)
-    if effective_payout_type == "fixed":
+    # The investor-level Fixed Amount is a single flat deal for the whole
+    # portfolio. But when individual cars carry their OWN fixed shares, those
+    # per-car amounts are the deal and the total must ACCUMULATE them —
+    # replacing the sum with the investor-level figure showed owners only one
+    # car's payment (Azeem, 2026-11-17: 3 fixed cars summed to 445k while the
+    # total displayed the 210k investor-level amount).
+    has_per_car_fixed = any(
+        c.investor_profit_share is not None and (c.investor_profit_share_type or "percentage") == "fixed"
+        for c in investor_cars
+    )
+    if effective_payout_type == "fixed" and not has_per_car_fixed:
         tot_investor_earnings = effective_fixed_amount
     payout_balance_due = tot_investor_earnings - tot_payouts
 
@@ -935,7 +945,13 @@ def get_shareholder_financial_summary(db: Session, shareholder_id: int, tenant_i
     tot_payouts = sum(p.amount for p in payouts)
     effective_payout_type = getattr(db_shareholder, "payout_type", "percentage") or "percentage"
     effective_fixed_amount = float(getattr(db_shareholder, "fixed_amount", 0.0) or 0.0)
-    if effective_payout_type == "fixed":
+    # Same precedence rule as investors: per-car fixed shares accumulate and
+    # win over the partner-level fixed total (see get_investor_financial_summary).
+    has_per_car_fixed = any(
+        c.shareholder_profit_share is not None and (c.shareholder_profit_share_type or "percentage") == "fixed"
+        for c in shareholder_cars
+    )
+    if effective_payout_type == "fixed" and not has_per_car_fixed:
         tot_shareholder_earnings = effective_fixed_amount
     payout_balance_due = tot_shareholder_earnings - tot_payouts
 
