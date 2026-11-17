@@ -1,4 +1,6 @@
 import os
+import re
+import mimetypes
 import shutil
 import subprocess
 import time
@@ -13,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from sqlalchemy import func, text
+from sqlalchemy import func, text, or_, cast, String
 from sqlalchemy.orm import Session, joinedload
 
 # Security dependencies
@@ -27,7 +29,7 @@ from pydantic import ValidationError
 
 from backend import models, schemas, crud, auth
 from backend.database import engine, get_db
-from backend.auth import get_tenant_context, create_access_token, verify_password, get_password_hash, require_super_admin, SUPER_ADMIN_PASSWORD
+from backend.auth import get_tenant_context, create_access_token, verify_password, get_password_hash, require_super_admin, SUPER_ADMIN_PASSWORD, decode_access_token
 
 # Create the tables
 models.Base.metadata.create_all(bind=engine)
@@ -51,6 +53,7 @@ def ensure_sqlite_columns():
             ("shareholder_id", "INTEGER"),
             ("shareholder_profit_share", "FLOAT"),
             ("shareholder_profit_share_type", "VARCHAR"),
+            ("attachments", "JSON"),
         ],
         "customers": [
             ("license_expiry_date", "DATE"),
@@ -235,7 +238,9 @@ if S3_BUCKET and S3_ACCESS_KEY and S3_SECRET_KEY:
 # Local document folders fallback
 os.makedirs("app_data/documents", exist_ok=True)
 os.makedirs("app_data/backups", exist_ok=True)
-app.mount("/uploads", StaticFiles(directory="app_data/documents"), name="uploads")
+# Uploaded files are NOT served statically: they go through the authenticated,
+# tenant-isolated routes in serve_uploaded_file (registered below), so one
+# workspace can never read another workspace's documents.
 
 
 # --- Automated Backup System ---
@@ -391,50 +396,27 @@ def shutdown_event():
     run_db_backup()
 
 
-# --- KYC Document Upload Validation & Sanitization ---
-def upload_file_securely(file: UploadFile) -> str:
-    """
-    Validates MIME type, limits size to 5MB,
-    renames filename to a random UUID, and uploads to S3 or local directory.
-    """
-    # Validate MIME type
-    allowed_types = ["image/png", "image/jpeg", "image/webp", "application/pdf"]
-    if file.content_type not in allowed_types:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid file type {file.content_type}. Only JPEG, PNG, WEBP, and PDF are allowed."
-        )
+# --- File Uploads: any type, tenant-owned, served via authenticated routes ---
+# Owner requirement (2026-11-17): every upload surface accepts files of ANY
+# type with no per-entity count limit. Safety no longer comes from a type
+# allowlist; it comes from random UUID storage names, per-tenant ownership
+# records, and authenticated tenant-isolated serving (see serve_uploaded_file),
+# where only preview-safe types are ever rendered inline.
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB per file
 
-    # Validate size (max 5MB)
-    max_size = 5 * 1024 * 1024
+
+def upload_file_securely(file: UploadFile, db=None, tenant_id: str = None) -> str:
+    """Stores an uploaded file under a random UUID name and records which
+    tenant owns it. Returns the authenticated file-route path."""
     file.file.seek(0, os.SEEK_END)
     size = file.file.tell()
     file.file.seek(0)
-    if size > max_size:
-        raise HTTPException(status_code=400, detail="File size exceeds the 5MB limit.")
     if size == 0:
         raise HTTPException(status_code=400, detail="File is empty.")
+    if size > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=400, detail="File size exceeds the 50MB limit.")
 
-    # The declared Content-Type is client-controlled and was trusted as-is:
-    # any bytes could be stored under an image/PDF name. Sniff the magic
-    # bytes and require them to match the declared type.
-    head = file.file.read(12)
-    file.file.seek(0)
-    def _sniff(b: bytes):
-        if b.startswith(b"\x89PNG\r\n\x1a\n"):
-            return "image/png"
-        if b.startswith(b"\xff\xd8\xff"):
-            return "image/jpeg"
-        if b.startswith(b"%PDF"):
-            return "application/pdf"
-        if b[:4] == b"RIFF" and b[8:12] == b"WEBP":
-            return "image/webp"
-        return None
-    if _sniff(head) != file.content_type:
-        raise HTTPException(status_code=400, detail="File content does not match its declared type.")
-
-    # Sanitize and rename
-    ext = os.path.splitext(file.filename)[1]
+    ext = os.path.splitext(file.filename or "")[1]
     safe_filename = f"{uuid.uuid4()}{ext}"
 
     if s3_client:
@@ -445,7 +427,8 @@ def upload_file_securely(file: UploadFile) -> str:
                 safe_filename,
                 ExtraArgs={"ContentType": file.content_type}
             )
-            # URL generator for S3 file
+            if db is not None and tenant_id:
+                _register_uploaded_file(db, tenant_id, safe_filename, file, size)
             if S3_ENDPOINT:
                 return f"{S3_ENDPOINT}/{S3_BUCKET}/{safe_filename}"
             return f"https://{S3_BUCKET}.s3.amazonaws.com/{safe_filename}"
@@ -454,11 +437,127 @@ def upload_file_securely(file: UploadFile) -> str:
         except Exception as e:
             print(f"[S3 Upload Error] {str(e)}")
 
-    # Fallback to local uploads
     filepath = os.path.join("app_data", "documents", safe_filename)
     with open(filepath, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-    return f"/uploads/{safe_filename}"
+    if db is not None and tenant_id:
+        _register_uploaded_file(db, tenant_id, safe_filename, file, size)
+    return f"/api/files/{safe_filename}"
+
+
+def _register_uploaded_file(db, tenant_id: str, stored_name: str, file: UploadFile, size: int):
+    try:
+        db.add(models.UploadedFile(
+            tenant_id=tenant_id,
+            stored_name=stored_name,
+            original_name=file.filename or stored_name,
+            content_type=file.content_type or "",
+            size=size,
+        ))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[UploadRegister] could not record ownership for {stored_name}: {e}")
+
+
+def _file_context(request: Request, token: Optional[str]):
+    """Auth for file routes: Bearer header or ?token= (needed by <img> tags and
+    plain download links, which cannot set headers). Returns None when there is
+    no valid login, so the handler can still serve public tenant logos."""
+    raw = None
+    auth_header = request.headers.get("Authorization") or ""
+    if auth_header.lower().startswith("bearer "):
+        raw = auth_header[7:]
+    elif token:
+        raw = token
+    if not raw:
+        return None
+    try:
+        payload = decode_access_token(raw)
+    except Exception:
+        return None
+    if not payload.get("tenant_id"):
+        return None
+    return {"tenant_id": payload["tenant_id"], "role": payload.get("role", "desk_staff")}
+
+
+def _references_file(db, stored_name: str, tenant_id: str = None) -> bool:
+    """True when a car/customer/tenant record references this stored file.
+    Used for files uploaded before ownership records existed."""
+    like = f"%{stored_name}%"
+    car_q = db.query(models.Car).filter(or_(
+        models.Car.image_url.like(like),
+        models.Car.registration_doc_url.like(like),
+        models.Car.fitness_cert_url.like(like),
+        models.Car.token_tax_doc_url.like(like),
+        cast(models.Car.attachments, String).like(like),
+    ))
+    cust_q = db.query(models.Customer).filter(or_(
+        models.Customer.cnic_front_path.like(like),
+        models.Customer.cnic_back_path.like(like),
+        models.Customer.license_front_path.like(like),
+        cast(models.Customer.extra_documents, String).like(like),
+    ))
+    tenant_q = db.query(models.Tenant).filter(models.Tenant.logo_url.like(like))
+    if tenant_id is not None:
+        car_q = car_q.filter(models.Car.tenant_id == tenant_id)
+        cust_q = cust_q.filter(models.Customer.tenant_id == tenant_id)
+        tenant_q = tenant_q.filter(models.Tenant.id == tenant_id)
+    return car_q.first() is not None or cust_q.first() is not None or tenant_q.first() is not None
+
+
+_INLINE_SAFE_PREFIXES = ("image/", "audio/", "video/")
+_INLINE_SAFE_TYPES = {"application/pdf", "text/plain"}
+
+
+@app.get("/api/files/{stored_name}")
+@app.get("/uploads/{stored_name}")
+def serve_uploaded_file(
+    stored_name: str,
+    request: Request,
+    download: bool = Query(False),
+    token: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """View/download an uploaded file. Requires the owning tenant's login
+    (header or ?token=), except tenant logos, which are public branding shown
+    on login pages. ?download=1 forces an attachment download carrying the
+    original filename; otherwise preview-safe types render inline and every
+    other type downloads (never executes) in the browser."""
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", stored_name) or ".." in stored_name:
+        raise HTTPException(status_code=400, detail="Invalid file name")
+    base = os.path.realpath(os.path.join("app_data", "documents"))
+    path = os.path.realpath(os.path.join(base, stored_name))
+    if not path.startswith(base + os.sep) or not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    row = db.query(models.UploadedFile).filter(
+        models.UploadedFile.stored_name == stored_name).first()
+    is_public_logo = db.query(models.Tenant).filter(
+        models.Tenant.logo_url.like(f"%{stored_name}")).first() is not None
+
+    if not is_public_logo:
+        ctx = _file_context(request, token)
+        if ctx is None:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        if ctx["role"] != "super_admin":
+            if row is not None:
+                if row.tenant_id != ctx["tenant_id"]:
+                    raise HTTPException(status_code=403, detail="This file belongs to another workspace")
+            elif not _references_file(db, stored_name, ctx["tenant_id"]) and _references_file(db, stored_name):
+                raise HTTPException(status_code=403, detail="This file belongs to another workspace")
+
+    media_type = mimetypes.guess_type(stored_name)[0] or "application/octet-stream"
+    inline_ok = media_type.startswith(_INLINE_SAFE_PREFIXES) or media_type in _INLINE_SAFE_TYPES
+    disposition = "attachment" if (download or not inline_ok) else "inline"
+    original = row.original_name if (row is not None and row.original_name) else stored_name
+    return FileResponse(
+        path,
+        media_type=media_type,
+        filename=original,
+        content_disposition_type=disposition,
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
 
 
 # --- Super Admin Authentication ---
@@ -980,9 +1079,9 @@ def get_car_history(
 
 
 @app.post("/api/cars/upload")
-def upload_car_image(file: UploadFile = File(...), tenant_context: dict = Depends(get_tenant_context)):
-    safe_url = upload_file_securely(file)
-    return {"image_url": safe_url}
+def upload_car_image(file: UploadFile = File(...), db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    safe_url = upload_file_securely(file, db, tenant_context["tenant_id"])
+    return {"image_url": safe_url, "filename": file.filename}
 
 
 # --- Customers Endpoints ---
@@ -1004,7 +1103,7 @@ def upload_customer_document(
     db: Session = Depends(get_db),
     tenant_context: dict = Depends(get_tenant_context)
 ):
-    path = upload_file_securely(file)
+    path = upload_file_securely(file, db, tenant_context["tenant_id"])
     return {
         "title": title,
         "file_path": path,
@@ -1045,9 +1144,9 @@ def create_customer(
         raise HTTPException(status_code=400, detail="Customer with this CNIC already exists")
 
     # Save uploaded files securely
-    cnic_front_path = upload_file_securely(cnic_front) if cnic_front else None
-    cnic_back_path = upload_file_securely(cnic_back) if cnic_back else None
-    license_front_path = upload_file_securely(license_front) if license_front else None
+    cnic_front_path = upload_file_securely(cnic_front, db, tenant_id) if cnic_front else None
+    cnic_back_path = upload_file_securely(cnic_back, db, tenant_id) if cnic_back else None
+    license_front_path = upload_file_securely(license_front, db, tenant_id) if license_front else None
 
     parsed_license_expiry = None
     if license_expiry_date:
@@ -1168,11 +1267,11 @@ def update_customer(
             update_data["extra_documents"] = []
 
     if cnic_front:
-        update_data["cnic_front_path"] = upload_file_securely(cnic_front)
+        update_data["cnic_front_path"] = upload_file_securely(cnic_front, db, tenant_id)
     if cnic_back:
-        update_data["cnic_back_path"] = upload_file_securely(cnic_back)
+        update_data["cnic_back_path"] = upload_file_securely(cnic_back, db, tenant_id)
     if license_front:
-        update_data["license_front_path"] = upload_file_securely(license_front)
+        update_data["license_front_path"] = upload_file_securely(license_front, db, tenant_id)
 
     try:
         update_schema = schemas.CustomerUpdate(**update_data)
@@ -1799,7 +1898,7 @@ def upload_tenant_logo(
     db: Session = Depends(get_db),
     tenant_context: dict = Depends(get_tenant_context)
 ):
-    safe_url = upload_file_securely(file)
+    safe_url = upload_file_securely(file, db, tenant_context["tenant_id"])
     db_tenant = crud.get_tenant(db, tenant_context["tenant_id"])
     if db_tenant:
         db_tenant.logo_url = safe_url

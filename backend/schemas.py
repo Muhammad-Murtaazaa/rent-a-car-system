@@ -24,6 +24,7 @@ class CarBase(BaseModel):
     investor_id: Optional[int] = None
     investor_profit_share: Optional[float] = Field(None, ge=0)
     investor_profit_share_type: Optional[str] = "percentage"  # percentage | fixed
+    attachments: Optional[Any] = None  # [{name, file_path}] — unlimited, any type
     shareholder_id: Optional[int] = None
     shareholder_profit_share: Optional[float] = Field(None, ge=0)
     shareholder_profit_share_type: Optional[str] = "percentage"  # percentage | fixed
@@ -52,6 +53,7 @@ class CarUpdate(BaseModel):
     investor_id: Optional[int] = None
     investor_profit_share: Optional[float] = Field(None, ge=0)
     investor_profit_share_type: Optional[str] = None  # percentage | fixed
+    attachments: Optional[Any] = None
     shareholder_id: Optional[int] = None
     shareholder_profit_share: Optional[float] = Field(None, ge=0)
     shareholder_profit_share_type: Optional[str] = None  # percentage | fixed

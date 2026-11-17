@@ -22,6 +22,8 @@ class Car(Base):
     registration_doc_url = Column(String, nullable=True)
     fitness_cert_url = Column(String, nullable=True)
     token_tax_doc_url = Column(String, nullable=True)
+    # Unlimited additional files of any type: [{name, file_path}]
+    attachments = Column(JSON, nullable=True, default=list)
     fitness_expiry_date = Column(Date, nullable=True)
     token_tax_expiry_date = Column(Date, nullable=True)
     registration_expiry_date = Column(Date, nullable=True)
@@ -474,6 +476,26 @@ class ChauffeurDriver(Base):
     specialties = Column(String, nullable=True)
     notes = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+class UploadedFile(Base):
+    """Ownership record for every file stored via the upload endpoints.
+
+    Files on disk carry random UUID names; this row ties each stored file to
+    the tenant that uploaded it (plus its original filename for downloads),
+    so the file-serving routes can enforce tenant isolation. Files uploaded
+    before this table existed have no row and are resolved by reference
+    scanning instead (see serve_uploaded_file in main.py).
+    """
+    __tablename__ = "uploaded_files"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(String, nullable=False, index=True)
+    stored_name = Column(String, nullable=False, unique=True, index=True)
+    original_name = Column(String, nullable=True)
+    content_type = Column(String, nullable=True)
+    size = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
 
 class DocumentCounter(Base):
     """Per-tenant sequential document numbers that are never re-issued.

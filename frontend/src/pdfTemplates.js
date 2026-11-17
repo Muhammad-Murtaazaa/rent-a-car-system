@@ -1,4 +1,5 @@
 import { jsPDF } from "jspdf";
+import { fileViewUrl } from "./fileUtils";
 
 function hexToRgb(hex) {
   const clean = (hex || "#e68a1e").replace("#", "");
@@ -22,7 +23,7 @@ function hexToRgb(hex) {
 async function loadLogoDataUrl(url) {
   if (!url) return null;
   try {
-    const res = await fetch(url);
+    const res = await fetch(fileViewUrl(url));
     if (!res.ok) return null;
     const blob = await res.blob();
     return await new Promise((resolve) => {

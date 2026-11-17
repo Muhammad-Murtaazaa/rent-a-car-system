@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { localTodayStr, localDateTimeStr } from "./dateUtils";
+import { fileViewUrl, fileDownloadUrl } from "./fileUtils";
 import { 
   Car, Users, Calendar, ShieldAlert, Wrench, Wallet, Plus, 
   Search, Trash2, Edit2, AlertTriangle, CheckCircle, Check, MessageSquare, FileText, Send, X, Clock, PenTool, TrendingUp, DollarSign, Sun, Moon, Briefcase, Menu, Eye, BarChart3, Download, Printer, PieChart, LineChart, UserPlus, Receipt, BadgeCheck, ClipboardList, ScrollText, Settings as SettingsIcon, Wifi, WifiOff, RefreshCw, Smartphone, Handshake, Sparkles, Lock
@@ -314,8 +315,8 @@ export default function App() {
       if (carsRes.ok) {
         const loadedCars = await carsRes.json();
         setCars(loadedCars);
-        const imgUrls = loadedCars.map(c => c.image_url).filter(Boolean);
-        if (branding?.logo_url) imgUrls.push(branding.logo_url);
+        const imgUrls = loadedCars.map(c => c.image_url).filter(Boolean).map(fileViewUrl);
+        if (branding?.logo_url) imgUrls.push(fileViewUrl(branding.logo_url));
         warmExtraUrls(imgUrls);
       }
       if (custRes.ok) setCustomers(await custRes.json());
@@ -658,7 +659,7 @@ export default function App() {
         <div className="flex items-center gap-2.5 min-w-0">
           {branding.logo_url ? (
             <img 
-              src={branding.logo_url} 
+              src={fileViewUrl(branding.logo_url)} 
               alt={branding.name || "Rent A Car Management System"} 
               className="h-8 max-w-[140px] object-contain object-left filter dark:brightness-110" 
             />
@@ -733,7 +734,7 @@ export default function App() {
               {branding.logo_url ? (
                 <div className="flex flex-col items-start gap-1">
                   <img 
-                    src={branding.logo_url} 
+                    src={fileViewUrl(branding.logo_url)} 
                     alt={branding.name || "Rent A Car Management System"} 
                     className="h-10 max-w-[160px] object-contain object-left filter dark:brightness-110" 
                   />
@@ -2007,7 +2008,7 @@ function FleetView({
     plate_number: "", chassis_number: "", make_model: "", model_year: 2026, color: "", 
     engine_cc: 1300, current_odometer: 0, transmission_type: "Auto", 
     status: "Available", last_oil_change_odometer: 0, image_url: "",
-    registration_doc_url: "", fitness_cert_url: "", token_tax_doc_url: "",
+    registration_doc_url: "", fitness_cert_url: "", token_tax_doc_url: "", attachments: [],
     fitness_expiry_date: "", token_tax_expiry_date: "", registration_expiry_date: "",
     ownership_type: "Company", investor_id: "", investor_profit_share: "", investor_profit_share_type: "percentage",
     shareholder_id: "", shareholder_profit_share: "", shareholder_profit_share_type: "percentage"
@@ -2027,6 +2028,7 @@ function FleetView({
         registration_doc_url: editingCar.registration_doc_url || "",
         fitness_cert_url: editingCar.fitness_cert_url || "",
         token_tax_doc_url: editingCar.token_tax_doc_url || "",
+        attachments: Array.isArray(editingCar.attachments) ? editingCar.attachments : [],
         fitness_expiry_date: editingCar.fitness_expiry_date ? String(editingCar.fitness_expiry_date).slice(0, 10) : "",
         token_tax_expiry_date: editingCar.token_tax_expiry_date ? String(editingCar.token_tax_expiry_date).slice(0, 10) : "",
         registration_expiry_date: editingCar.registration_expiry_date ? String(editingCar.registration_expiry_date).slice(0, 10) : "",
@@ -2062,6 +2064,32 @@ function FleetView({
     } catch (err) {
       console.error("Upload error:", err);
       alert("Error uploading file.");
+    }
+  };
+
+  // Unlimited additional files of any type for this vehicle.
+  const handleCarAttachmentsUpload = async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    for (const file of files) {
+      const formData = new FormData();
+      formData.append("file", file);
+      try {
+        const res = await fetch("/api/cars/upload", { method: "POST", body: formData });
+        if (res.ok) {
+          const data = await res.json();
+          setForm(prev => ({
+            ...prev,
+            attachments: [...(Array.isArray(prev.attachments) ? prev.attachments : []), { name: file.name, file_path: data.image_url }]
+          }));
+        } else {
+          const err = await res.json().catch(() => ({}));
+          alert(err.detail || `Failed to upload ${file.name}.`);
+        }
+      } catch (err) {
+        console.error("Attachment upload error:", err);
+        alert(`Error uploading ${file.name}.`);
+      }
     }
   };
 
@@ -2160,7 +2188,7 @@ function FleetView({
                 <div className="relative h-44 w-full bg-slate-900/50 overflow-hidden">
                   {car.image_url ? (
                     <img 
-                      src={car.image_url} 
+                      src={fileViewUrl(car.image_url)} 
                       alt={car.make_model} 
                       className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-500"
                       onError={(e) => {
@@ -2319,7 +2347,7 @@ function FleetView({
               <div className="space-y-3">
                 {form.image_url ? (
                   <div className="flex items-center gap-4 bg-[var(--bg-app)] border border-[var(--border-color)] p-3 rounded-lg">
-                    <img src={form.image_url} alt="Preview" className="h-12 w-20 object-cover rounded-lg border border-[var(--border-color)]" />
+                    <img src={fileViewUrl(form.image_url)} alt="Preview" className="h-12 w-20 object-cover rounded-lg border border-[var(--border-color)]" />
                     <div className="flex-1 min-w-0">
                       <span className="text-[10px] text-[var(--text-muted)] block">Selected Image:</span>
                       <span className="text-xs text-[var(--text-main)] truncate block font-mono">{form.image_url}</span>
@@ -2336,9 +2364,8 @@ function FleetView({
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Vehicle Image (Upload File)</label>
-                      <input 
+                      <input
                         type="file"
-                        accept="image/*"
                         onChange={(e) => handleFileUpload(e, "image_url")}
                         className="w-full app-input rounded-lg p-2 focus:outline-none text-[11px] text-[var(--text-main)]"
                       />
@@ -2369,8 +2396,11 @@ function FleetView({
                     {form[doc.field] ? (
                       <div className="flex items-center gap-3 bg-[var(--bg-app)] border border-[var(--border-color)] p-2.5 rounded-lg">
                         <FileText className="h-4 w-4 text-[var(--accent-color)] shrink-0" />
-                        <a href={form[doc.field]} target="_blank" rel="noreferrer" className="flex-1 min-w-0 text-xs text-[var(--accent-color)] truncate underline">
-                          {form[doc.field]}
+                        <a href={fileViewUrl(form[doc.field])} target="_blank" rel="noreferrer" className="flex-1 min-w-0 text-xs text-[var(--accent-color)] truncate underline">
+                          View document
+                        </a>
+                        <a href={fileDownloadUrl(form[doc.field])} className="text-xs text-teal-600 dark:text-teal-400 hover:underline font-semibold">
+                          Download
                         </a>
                         <button
                           type="button"
@@ -2383,7 +2413,6 @@ function FleetView({
                     ) : (
                       <input
                         type="file"
-                        accept="image/*,.pdf"
                         onChange={(e) => handleFileUpload(e, doc.field)}
                         className="w-full app-input rounded-lg p-2 focus:outline-none text-[11px] text-[var(--text-main)]"
                       />
@@ -2404,6 +2433,32 @@ function FleetView({
                     <input type="date" value={form.token_tax_expiry_date || ""} onChange={(e) => setForm({...form, token_tax_expiry_date: e.target.value})} className="w-full app-input rounded-lg p-2 focus:outline-none text-xs" />
                   </div>
                 </div>
+              </div>
+
+              <div className="border-t border-[var(--border-color)] pt-4 space-y-3">
+                <p className="text-xs font-bold text-[var(--text-main)] uppercase tracking-wider">Additional Files & Attachments</p>
+                <p className="text-[11px] text-[var(--text-muted)]">Unlimited files of any type (photos, PDFs, Office documents, ZIPs, scans...). Select several at once.</p>
+                {(Array.isArray(form.attachments) ? form.attachments : []).map((att, aIdx) => (
+                  <div key={aIdx} className="flex items-center gap-3 bg-[var(--bg-app)] border border-[var(--border-color)] p-2.5 rounded-lg">
+                    <FileText className="h-4 w-4 text-[var(--accent-color)] shrink-0" />
+                    <span className="flex-1 min-w-0 text-xs text-[var(--text-main)] truncate">{att.name || "file"}</span>
+                    <a href={fileViewUrl(att.file_path)} target="_blank" rel="noreferrer" className="text-xs text-[var(--accent-color)] hover:underline font-semibold">View</a>
+                    <a href={fileDownloadUrl(att.file_path)} className="text-xs text-teal-600 dark:text-teal-400 hover:underline font-semibold">Download</a>
+                    <button
+                      type="button"
+                      onClick={() => setForm(prev => ({ ...prev, attachments: (prev.attachments || []).filter((_, i) => i !== aIdx) }))}
+                      className="text-xs text-rose-700 dark:text-rose-400 hover:underline font-semibold"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+                <input
+                  type="file"
+                  multiple
+                  onChange={handleCarAttachmentsUpload}
+                  className="w-full app-input rounded-lg p-2 focus:outline-none text-[11px] text-[var(--text-main)]"
+                />
               </div>
 
               <div className="grid grid-cols-3 gap-4">
@@ -2876,18 +2931,18 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
                 <td className="p-4">
                   <div className="flex flex-wrap items-center gap-1.5">
                     {cust.cnic_front_path ? (
-                      <a href={cust.cnic_front_path} target="_blank" rel="noreferrer" className="text-xs font-semibold px-2 py-1 rounded bg-teal-500/10 text-teal-700 dark:text-teal-400 border border-teal-500/20">CNIC F</a>
+                      <a href={fileViewUrl(cust.cnic_front_path)} target="_blank" rel="noreferrer" className="text-xs font-semibold px-2 py-1 rounded bg-teal-500/10 text-teal-700 dark:text-teal-400 border border-teal-500/20">CNIC F</a>
                     ) : <span className="text-slate-600 text-xs italic">No Front</span>}
                     {cust.cnic_back_path ? (
-                      <a href={cust.cnic_back_path} target="_blank" rel="noreferrer" className="text-xs font-semibold px-2 py-1 rounded bg-teal-500/10 text-teal-700 dark:text-teal-400 border border-teal-500/20">CNIC B</a>
+                      <a href={fileViewUrl(cust.cnic_back_path)} target="_blank" rel="noreferrer" className="text-xs font-semibold px-2 py-1 rounded bg-teal-500/10 text-teal-700 dark:text-teal-400 border border-teal-500/20">CNIC B</a>
                     ) : null}
                     {cust.license_front_path ? (
-                      <a href={cust.license_front_path} target="_blank" rel="noreferrer" className="text-xs font-semibold px-2 py-1 rounded bg-teal-500/10 text-teal-700 dark:text-teal-400 border border-teal-500/20">Lic</a>
+                      <a href={fileViewUrl(cust.license_front_path)} target="_blank" rel="noreferrer" className="text-xs font-semibold px-2 py-1 rounded bg-teal-500/10 text-teal-700 dark:text-teal-400 border border-teal-500/20">Lic</a>
                     ) : null}
                     {Array.isArray(cust.extra_documents) && cust.extra_documents.map((doc, dIdx) => (
                       <a 
                         key={dIdx}
-                        href={doc.file_path} 
+                        href={fileViewUrl(doc.file_path)} 
                         target="_blank" 
                         rel="noreferrer" 
                         title={`${doc.title || "Document"}: ${doc.filename || "file"}`}
@@ -2968,25 +3023,36 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
             </div>
             <div className="pt-2.5 border-t border-[var(--border-color)] flex flex-wrap gap-2">
               {cust.cnic_front_path && (
-                <a href={cust.cnic_front_path} target="_blank" rel="noreferrer" className="text-xs text-teal-700 dark:text-teal-400 font-bold bg-teal-500/10 border border-teal-500/20 px-2.5 py-2 rounded min-h-[44px] flex items-center">CNIC F</a>
+                <span className="flex items-center gap-1">
+                  <a href={fileViewUrl(cust.cnic_front_path)} target="_blank" rel="noreferrer" className="text-xs text-teal-700 dark:text-teal-400 font-bold bg-teal-500/10 border border-teal-500/20 px-2.5 py-2 rounded min-h-[44px] flex items-center">CNIC F</a>
+                  <a href={fileDownloadUrl(cust.cnic_front_path)} title="Download CNIC front" className="text-xs font-bold text-teal-700 dark:text-teal-400 bg-teal-500/10 border border-teal-500/20 px-2 py-2 rounded min-h-[44px] flex items-center">↓</a>
+                </span>
               )}
               {cust.cnic_back_path && (
-                <a href={cust.cnic_back_path} target="_blank" rel="noreferrer" className="text-xs text-teal-655 font-bold bg-teal-500/10 border border-teal-500/20 px-2.5 py-2 rounded min-h-[44px] flex items-center">CNIC B</a>
+                <span className="flex items-center gap-1">
+                  <a href={fileViewUrl(cust.cnic_back_path)} target="_blank" rel="noreferrer" className="text-xs text-teal-655 font-bold bg-teal-500/10 border border-teal-500/20 px-2.5 py-2 rounded min-h-[44px] flex items-center">CNIC B</a>
+                  <a href={fileDownloadUrl(cust.cnic_back_path)} title="Download CNIC back" className="text-xs font-bold text-teal-700 dark:text-teal-400 bg-teal-500/10 border border-teal-500/20 px-2 py-2 rounded min-h-[44px] flex items-center">↓</a>
+                </span>
               )}
               {cust.license_front_path && (
-                <a href={cust.license_front_path} target="_blank" rel="noreferrer" className="text-xs text-teal-655 font-bold bg-teal-500/10 border border-teal-500/20 px-2.5 py-2 rounded min-h-[44px] flex items-center">License</a>
+                <span className="flex items-center gap-1">
+                  <a href={fileViewUrl(cust.license_front_path)} target="_blank" rel="noreferrer" className="text-xs text-teal-655 font-bold bg-teal-500/10 border border-teal-500/20 px-2.5 py-2 rounded min-h-[44px] flex items-center">License</a>
+                  <a href={fileDownloadUrl(cust.license_front_path)} title="Download licence" className="text-xs font-bold text-teal-700 dark:text-teal-400 bg-teal-500/10 border border-teal-500/20 px-2 py-2 rounded min-h-[44px] flex items-center">↓</a>
+                </span>
               )}
               {Array.isArray(cust.extra_documents) && cust.extra_documents.map((doc, dIdx) => (
-                <a 
-                  key={dIdx} 
-                  href={doc.file_path} 
-                  target="_blank" 
-                  rel="noreferrer" 
-                  className="text-xs text-indigo-700 dark:text-indigo-400 font-bold bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-2 rounded min-h-[44px] flex items-center gap-1"
-                >
-                  <FileText className="h-3 w-3" />
-                  <span className="max-w-[80px] truncate">{doc.title ? doc.title.replace("Guarantor ", "G ") : "PDF"}</span>
-                </a>
+                <span key={dIdx} className="flex items-center gap-1">
+                  <a
+                    href={fileViewUrl(doc.file_path)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-indigo-700 dark:text-indigo-400 font-bold bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-2 rounded min-h-[44px] flex items-center gap-1"
+                  >
+                    <FileText className="h-3 w-3" />
+                    <span className="max-w-[80px] truncate">{doc.title ? doc.title.replace("Guarantor ", "G ") : "Document"}</span>
+                  </a>
+                  <a href={fileDownloadUrl(doc.file_path)} title={`Download ${doc.filename || "file"}`} className="text-xs font-bold text-indigo-700 dark:text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2 py-2 rounded min-h-[44px] flex items-center">↓</a>
+                </span>
               ))}
             </div>
           </div>
@@ -3165,15 +3231,15 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
                 <div className="grid grid-cols-3 gap-2">
                   <div className="bg-[var(--bg-app)] border border-[var(--border-color)] p-2 rounded-lg text-center">
                     <span className="text-[10px] text-[var(--text-muted)] block mb-1">CNIC Front</span>
-                    <input type="file" accept="image/*,.pdf" onChange={(e) => setCnicFrontFile(e.target.files[0])} className="w-full text-xs text-[var(--text-main)]" />
+                    <input type="file" onChange={(e) => setCnicFrontFile(e.target.files[0])} className="w-full text-xs text-[var(--text-main)]" />
                   </div>
                   <div className="bg-[var(--bg-app)] border border-[var(--border-color)] p-2 rounded-lg text-center">
                     <span className="text-[10px] text-[var(--text-muted)] block mb-1">CNIC Back</span>
-                    <input type="file" accept="image/*,.pdf" onChange={(e) => setCnicBackFile(e.target.files[0])} className="w-full text-xs text-[var(--text-main)]" />
+                    <input type="file" onChange={(e) => setCnicBackFile(e.target.files[0])} className="w-full text-xs text-[var(--text-main)]" />
                   </div>
                   <div className="bg-[var(--bg-app)] border border-[var(--border-color)] p-2 rounded-lg text-center">
                     <span className="text-[10px] text-[var(--text-muted)] block mb-1">License Front</span>
-                    <input type="file" accept="image/*,.pdf" onChange={(e) => setLicenseFrontFile(e.target.files[0])} className="w-full text-xs text-[var(--text-main)]" />
+                    <input type="file" onChange={(e) => setLicenseFrontFile(e.target.files[0])} className="w-full text-xs text-[var(--text-main)]" />
                   </div>
                 </div>
               </div>
@@ -3214,16 +3280,16 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
                       </select>
                     </div>
                     <div>
-                      <label className="block text-[10px] font-semibold text-[var(--text-muted)] mb-1">Select File (PDF / Image)</label>
-                      <input 
-                        type="file" 
-                        accept=".pdf,image/*" 
+                      <label className="block text-[10px] font-semibold text-[var(--text-muted)] mb-1">Select Files (any type, unlimited — select several at once)</label>
+                      <input
+                        type="file"
+                        multiple
                         disabled={docUploadLoading}
-                        onChange={(e) => {
-                          const f = e.target.files?.[0];
-                          if (f) {
-                            handleAttachExtraDoc(f, newDocPreset);
-                            e.target.value = "";
+                        onChange={async (e) => {
+                          const files = Array.from(e.target.files || []);
+                          e.target.value = "";
+                          for (const f of files) {
+                            await handleAttachExtraDoc(f, newDocPreset);
                           }
                         }}
                         className="w-full text-xs text-[var(--text-main)] file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 cursor-pointer"
@@ -3258,13 +3324,19 @@ function CustomersView({ customers, search, setSearch, fetchData, showModal, set
                               </div>
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
-                              <a 
-                                href={doc.file_path} 
-                                target="_blank" 
-                                rel="noreferrer" 
+                              <a
+                                href={fileViewUrl(doc.file_path)}
+                                target="_blank"
+                                rel="noreferrer"
                                 className="text-[10px] font-bold text-teal-600 dark:text-teal-400 hover:underline px-2 py-1 rounded bg-teal-500/10 border border-teal-500/20"
                               >
                                 View
+                              </a>
+                              <a
+                                href={fileDownloadUrl(doc.file_path)}
+                                className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline px-2 py-1 rounded bg-indigo-500/10 border border-indigo-500/20"
+                              >
+                                Download
                               </a>
                               <button 
                                 type="button" 
@@ -9232,13 +9304,13 @@ function DocumentVaultView({ customers, cars, investors, fetchData }) {
                 <div className="border border-[var(--border-color)] p-2 rounded-xl bg-[var(--bg-app)]">
                   <span className="block text-[10px] text-[var(--text-muted)] font-bold mb-1">CNIC Front</span>
                   {cust.cnic_front_path ? (
-                    <img src={cust.cnic_front_path} alt="Front CNIC" className="h-16 w-full object-cover rounded" />
+                    <img src={fileViewUrl(cust.cnic_front_path)} alt="Front CNIC" className="h-16 w-full object-cover rounded" />
                   ) : <span className="text-[10px] italic text-[var(--text-muted)]">No scan</span>}
                 </div>
                 <div className="border border-[var(--border-color)] p-2 rounded-xl bg-[var(--bg-app)]">
                   <span className="block text-[10px] text-[var(--text-muted)] font-bold mb-1">CNIC Back</span>
                   {cust.cnic_back_path ? (
-                    <img src={cust.cnic_back_path} alt="Back CNIC" className="h-16 w-full object-cover rounded" />
+                    <img src={fileViewUrl(cust.cnic_back_path)} alt="Back CNIC" className="h-16 w-full object-cover rounded" />
                   ) : <span className="text-[10px] italic text-[var(--text-muted)]">No scan</span>}
                 </div>
               </div>

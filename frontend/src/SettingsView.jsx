@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Settings, Upload, Palette, Building2, Landmark, FileText, CheckCircle, Download, Trash2, Sparkles } from "lucide-react";
 import { generateLetterheadPDF } from "./pdfTemplates";
+import { fileViewUrl } from "./fileUtils";
 
 const COLOR_PRESETS = [
   { name: "Teal", hex: "#0d9488" },
@@ -186,7 +187,7 @@ export default function SettingsView({ branding, setBranding }) {
           <div className="flex items-center gap-4">
             {form.logo_url && (
               <img
-                src={form.logo_url}
+                src={fileViewUrl(form.logo_url)}
                 alt="Agency Logo"
                 className="h-14 w-20 object-contain bg-slate-950/90 rounded-lg p-1.5 shadow"
               />
@@ -218,7 +219,7 @@ export default function SettingsView({ branding, setBranding }) {
               <div className="flex items-center gap-4">
                 {form.logo_url ? (
                   <div className="relative h-16 w-28 rounded-xl border border-[var(--border-color)] bg-slate-950 flex items-center justify-center p-2">
-                    <img src={form.logo_url} alt="Logo" className="max-h-full max-w-full object-contain" />
+                    <img src={fileViewUrl(form.logo_url)} alt="Logo" className="max-h-full max-w-full object-contain" />
                     <button
                       type="button"
                       onClick={() => setForm(p => ({ ...p, logo_url: "" }))}
@@ -237,7 +238,7 @@ export default function SettingsView({ branding, setBranding }) {
                   <label className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-teal-500/10 text-teal-500 border border-teal-500/20 font-bold cursor-pointer hover:bg-teal-500/20">
                     <Upload className="h-3.5 w-3.5" />
                     <span>{uploading ? "Uploading..." : "Upload Logo Image"}</span>
-                    <input type="file" accept="image/png,image/jpeg,image/webp" onChange={handleLogoUpload} className="hidden" />
+                    <input type="file" onChange={handleLogoUpload} className="hidden" />
                   </label>
                   <input
                     type="text"
