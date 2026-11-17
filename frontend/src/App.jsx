@@ -221,9 +221,9 @@ export default function App() {
   const [bookingForm, setBookingForm] = useState({
     car_id: "", customer_id: "", start_datetime: "", expected_end_datetime: "",
     daily_rate: 3000, is_chauffeur_driven: false, chauffeur_daily_wage: 1500,
-    security_deposit_amount: 10000, security_deposit_type: "Cash", security_deposit_status: "Held",
+    security_deposit_amount: 10000, security_deposit_type: "Cash", security_deposit_status: "Received",
     booking_type: "Individual", company_name: "", booked_cars: [],
-    driver_type: "Company Driver", driver_name: "", driver_phone: "", driver_cnic: "", driver_license: "",
+    driver_type: "Company Driver", driver_employee_id: null, driver_name: "", driver_phone: "", driver_cnic: "", driver_license: "",
     billable_days: "", specific_days_notes: ""
   });
 
@@ -1155,6 +1155,7 @@ export default function App() {
             setSelectedBooking={setSelectedBooking}
             checkCnicBlacklist={checkCnicBlacklist}
             setErrorMessage={setErrorMessage}
+            employees={employees}
             signatureCanvasRef={signatureCanvasRef}
             signatureImage={signatureImage}
             startDrawing={startDrawing}
@@ -1528,7 +1529,7 @@ function DashboardView({
   const daily = dailyCashSummary(financials, maintenance, bookings, reportDate, payouts);
   const monthSeries = monthlyCashflow(financials, maintenance, 6, payouts);
 
-  const heldDepositsBookings = bookings.filter(b => b.security_deposit_status === "Held" && (b.status === "Active" || b.status === "Reserved"));
+  const heldDepositsBookings = bookings.filter(b => (b.security_deposit_status === "Received" || b.security_deposit_status === "Held") && (b.status === "Active" || b.status === "Reserved"));
 
   return (
     <div className="space-y-8">
@@ -3564,7 +3565,7 @@ function BookingsView({
   showModal, setShowModal, showReturnModal, setShowReturnModal, 
   selectedBooking, setSelectedBooking, checkCnicBlacklist, setErrorMessage,
   signatureCanvasRef, signatureImage, startDrawing, draw, stopDrawing, clearSignature, theme,
-  setForm, form, branding = {}, financials = []
+  setForm, form, branding = {}, financials = [], employees = []
 }) {
   if (!form) {
     console.error("BookingsView error: 'form' prop is missing or undefined");
@@ -3604,11 +3605,12 @@ function BookingsView({
       chauffeur_daily_wage: b.chauffeur_daily_wage || 1500,
       security_deposit_amount: b.security_deposit_amount || 0,
       security_deposit_type: b.security_deposit_type || "Cash",
-      security_deposit_status: b.security_deposit_status || "Held",
+      security_deposit_status: b.security_deposit_status || "Received",
       booking_type: b.booking_type || "Individual",
       company_name: b.company_name || "",
       booked_cars: bookedCars,
       driver_type: b.driver_type || "Company Driver",
+      driver_employee_id: b.driver_employee_id || null,
       driver_name: b.driver_name || "",
       driver_phone: b.driver_phone || "",
       driver_cnic: b.driver_cnic || "",
@@ -3849,10 +3851,14 @@ function BookingsView({
       company_name: form.booking_type === "Company" ? form.company_name : null,
       booked_cars: bookedCarsPayload,
       driver_type: form.driver_type || "Company Driver",
-      driver_name: form.driver_type === "Freelance Driver" ? form.driver_name : null,
-      driver_phone: form.driver_type === "Freelance Driver" ? form.driver_phone : null,
-      driver_cnic: form.driver_type === "Freelance Driver" ? form.driver_cnic : null,
-      driver_license: form.driver_type === "Freelance Driver" ? form.driver_license : null,
+      // Driver particulars are saved for BOTH driver kinds now: a Company
+      // Driver picked from the Employees roster brings name/phone/CNIC/
+      // licence with him, and they are stored on the booking.
+      driver_employee_id: form.is_chauffeur_driven && form.driver_type !== "Freelance Driver" ? (form.driver_employee_id || null) : null,
+      driver_name: form.is_chauffeur_driven ? (form.driver_name || null) : null,
+      driver_phone: form.is_chauffeur_driven ? (form.driver_phone || null) : null,
+      driver_cnic: form.is_chauffeur_driven ? (form.driver_cnic || null) : null,
+      driver_license: form.is_chauffeur_driven ? (form.driver_license || null) : null,
       billable_days: billableDaysVal,
       specific_days_notes: form.specific_days_notes || ""
     };
@@ -4274,11 +4280,12 @@ function BookingsView({
               chauffeur_daily_wage: 1500,
               security_deposit_amount: 10000,
               security_deposit_type: "Cash",
-              security_deposit_status: "Held",
+              security_deposit_status: "Received",
               booking_type: "Individual",
               company_name: "",
               booked_cars: [],
               driver_type: "Company Driver",
+              driver_employee_id: null,
               driver_name: "",
               driver_phone: "",
               driver_cnic: "",
@@ -4558,7 +4565,7 @@ function BookingsView({
               <p>Daily Rate: <span className="text-[var(--text-main)] font-semibold">PKR {b.daily_rate.toLocaleString()}</span></p>
               <p>Driver: <span className="text-[var(--text-main)] font-semibold">
                 {b.is_chauffeur_driven 
-                  ? (b.driver_type === "Freelance Driver" ? `Freelance: ${b.driver_name || "Driver"} (PKR ${b.chauffeur_daily_wage}/d)` : `Company Staff (PKR ${b.chauffeur_daily_wage}/d)`)
+                  ? (b.driver_type === "Freelance Driver" ? `Freelance: ${b.driver_name || "Driver"} (PKR ${b.chauffeur_daily_wage}/d)` : `${b.driver_name || "Company Staff"} (PKR ${b.chauffeur_daily_wage}/d)`)
                   : "Self Driven"}
               </span></p>
               <p>Deposit: <span className="text-[var(--text-main)] font-semibold">PKR {b.security_deposit_amount} ({b.security_deposit_type})</span></p>
@@ -4875,7 +4882,7 @@ function BookingsView({
                     {selectedBooking.is_chauffeur_driven 
                       ? (selectedBooking.driver_type === "Freelance Driver"
                           ? `Freelance: ${selectedBooking.driver_name || "Driver"}${selectedBooking.driver_phone ? ` (${selectedBooking.driver_phone})` : ""}${selectedBooking.driver_license ? ` · Licence ${selectedBooking.driver_license}` : ""} · PKR ${selectedBooking.chauffeur_daily_wage}/d`
-                          : `Staff Driver (PKR ${selectedBooking.chauffeur_daily_wage}/d)`)
+                          : `Staff Driver: ${selectedBooking.driver_name || "—"}${selectedBooking.driver_phone ? ` (${selectedBooking.driver_phone})` : ""}${selectedBooking.driver_license ? ` · Licence ${selectedBooking.driver_license}` : ""} · PKR ${selectedBooking.chauffeur_daily_wage}/d`)
                       : "Self Driven"}
                   </span>
                 </div>
@@ -5419,13 +5426,86 @@ function BookingsView({
                         <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">Driver Option</label>
                         <select
                           value={form.driver_type || "Company Driver"}
-                          onChange={(e) => setForm({ ...form, driver_type: e.target.value })}
+                          onChange={(e) => setForm({ ...form, driver_type: e.target.value, driver_employee_id: e.target.value === "Freelance Driver" ? null : form.driver_employee_id })}
                           className="w-full app-input rounded-lg p-2 text-xs font-semibold"
                         >
                           <option value="Company Driver">Company Driver (Own Staff)</option>
                           <option value="Freelance Driver">Freelance / External Driver</option>
                         </select>
                       </div>
+
+                      {form.driver_type !== "Freelance Driver" && (
+                        <div className="space-y-2 border-t border-[var(--border-color)] pt-2">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-teal-600 dark:text-teal-400">Company Driver — from Employees Roster</p>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-[var(--text-muted)] mb-1">Search Driver by Name *</label>
+                            <input
+                              type="text"
+                              list="roster-driver-names"
+                              placeholder="Start typing a driver name..."
+                              value={form.driver_name || ""}
+                              onChange={(e) => {
+                                const name = e.target.value;
+                                const emp = (employees || []).find(x => x.role === "Driver" && x.status !== "Inactive" && x.full_name === name);
+                                if (emp) {
+                                  setForm({ ...form, driver_name: emp.full_name, driver_phone: emp.phone || "", driver_cnic: emp.cnic_number || "", driver_license: emp.license_number || "", driver_employee_id: emp.id });
+                                } else {
+                                  setForm({ ...form, driver_name: name, driver_employee_id: null });
+                                }
+                              }}
+                              className="w-full app-input rounded-lg p-2 text-xs"
+                            />
+                            <datalist id="roster-driver-names">
+                              {(employees || []).filter(x => x.role === "Driver" && x.status !== "Inactive").map(emp => (
+                                <option key={emp.id} value={emp.full_name}>
+                                  {[emp.phone, emp.license_number ? `Lic ${emp.license_number}` : ""].filter(Boolean).join(" · ")}
+                                </option>
+                              ))}
+                            </datalist>
+                            {(employees || []).filter(x => x.role === "Driver" && x.status !== "Inactive").length === 0 && (
+                              <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">No drivers in the Employees roster yet — add them under Employees (role: Driver, with licence number) and they will appear here.</p>
+                            )}
+                            {form.driver_name && !form.driver_employee_id && (
+                              <p className="text-[10px] text-[var(--text-muted)] mt-1">Not linked to the roster — pick a name from the list to auto-fill the details, or keep typing to save as entered.</p>
+                            )}
+                            {form.driver_employee_id && (
+                              <p className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-1">Linked to the Employees roster — details below were filled from the driver record and will be saved on this booking.</p>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-[10px] font-semibold text-[var(--text-muted)] mb-1">Driver Phone</label>
+                              <input
+                                type="text"
+                                placeholder="03001234567"
+                                value={form.driver_phone || ""}
+                                onChange={(e) => setForm({ ...form, driver_phone: e.target.value })}
+                                className="w-full app-input rounded-lg p-2 text-xs font-mono"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-semibold text-[var(--text-muted)] mb-1">Driver CNIC</label>
+                              <input
+                                type="text"
+                                placeholder="35201xxxxxxx"
+                                value={form.driver_cnic || ""}
+                                onChange={(e) => setForm({ ...form, driver_cnic: e.target.value })}
+                                className="w-full app-input rounded-lg p-2 text-xs font-mono"
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-[var(--text-muted)] mb-1">Driver Licence No</label>
+                            <input
+                              type="text"
+                              placeholder="e.g. LHR-2024-12345"
+                              value={form.driver_license || ""}
+                              onChange={(e) => setForm({ ...form, driver_license: e.target.value })}
+                              className="w-full app-input rounded-lg p-2 text-xs font-mono"
+                            />
+                          </div>
+                        </div>
+                      )}
 
                       {form.driver_type === "Freelance Driver" && (
                         <div className="space-y-2 border-t border-[var(--border-color)] pt-2">
@@ -5513,7 +5593,13 @@ function BookingsView({
                     <option value="Cash">Cash</option>
                     <option value="Cheque">Cheque</option>
                     <option value="Bank Transfer">Bank Transfer</option>
+                    <option value="Online Transfer">Online Transfer</option>
+                    <option value="Token">Token</option>
+                    <option value="Item">Item</option>
                     <option value="Name">Name</option>
+                    {form.security_deposit_type && !["Cash", "Cheque", "Bank Transfer", "Online Transfer", "Token", "Item", "Name"].includes(form.security_deposit_type) && (
+                      <option value={form.security_deposit_type}>{form.security_deposit_type} (previous)</option>
+                    )}
                   </select>
                 </div>
                 <div>
@@ -5523,10 +5609,12 @@ function BookingsView({
                     onChange={(e) => setForm({...form, security_deposit_status: e.target.value})}
                     className="w-full app-input rounded-lg p-2.5 text-xs focus:outline-none"
                   >
-                    <option value="Held">Held</option>
-                    <option value="Refunded">Refunded</option>
-                    <option value="Withheld">Withheld</option>
-                    <option value="Partially Withheld">Partially Withheld</option>
+                    <option value="Received">Received</option>
+                    <option value="Balance">Balance</option>
+                    <option value="Total Rent">Total Rent</option>
+                    {form.security_deposit_status && !["Received", "Balance", "Total Rent"].includes(form.security_deposit_status) && (
+                      <option value={form.security_deposit_status}>{form.security_deposit_status} (previous)</option>
+                    )}
                   </select>
                 </div>
               </div>
@@ -9195,7 +9283,7 @@ function CalendarGridSection({ bookings, cars, customers, setShowModal, setForm,
                     chauffeur_daily_wage: 1500,
                     security_deposit_amount: 10000,
                     security_deposit_type: "Cash",
-                    security_deposit_status: "Held"
+                    security_deposit_status: "Received"
                   });
                   setShowModal(true);
                 }}

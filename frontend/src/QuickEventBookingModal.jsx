@@ -846,9 +846,13 @@ export default function QuickEventBookingModal({
                     className="w-full app-input rounded-xl px-3 py-2 text-xs focus:outline-none"
                   >
                     <option value="Cash">Cash</option>
-                    <option value="Original ID / Passport">Original ID / Passport</option>
                     <option value="Cheque">Cheque</option>
-                    <option value="Token">Token Item</option>
+                    <option value="Bank Transfer">Bank Transfer</option>
+                    <option value="Online Transfer">Online Transfer</option>
+                    <option value="Token">Token</option>
+                    <option value="Item">Item</option>
+                    <option value="Name">Name</option>
+                    <option value="Original ID / Passport">Original ID / Passport</option>
                   </select>
                 </div>
               </div>

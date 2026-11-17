@@ -118,11 +118,15 @@ class Booking(Base):
     chauffeur_daily_wage = Column(Float, nullable=False, default=0.0)
     security_deposit_amount = Column(Float, nullable=False, default=0.0)
     security_deposit_type = Column(String, nullable=False)  # Cash, Cheque, Token/Item
-    security_deposit_status = Column(String, nullable=False, default="Held")  # Held, Refunded, Withheld
+    security_deposit_status = Column(String, nullable=False, default="Received")  # Received, Balance, Total Rent (older records may carry Held/Refunded/Withheld from the return flow)
     status = Column(String, nullable=False, default="Active")  # Active, Reserved, Completed, Cancelled
     booking_type = Column(String, nullable=False, default="Individual")  # Individual, Company
     company_name = Column(String, nullable=True)
     driver_type = Column(String, nullable=True, default="Company Driver")  # Company Driver, Freelance Driver
+    # When a Company Driver is picked from the Employees roster, this links
+    # the booking back to that employee record (details are also copied onto
+    # the booking so history survives roster edits).
+    driver_employee_id = Column(Integer, nullable=True)
     driver_name = Column(String, nullable=True)
     driver_phone = Column(String, nullable=True)
     driver_cnic = Column(String, nullable=True)

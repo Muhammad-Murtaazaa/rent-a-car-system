@@ -181,11 +181,12 @@ class BookingBase(BaseModel):
     chauffeur_daily_wage: float = Field(0.0, ge=0)
     security_deposit_amount: float = Field(0.0, ge=0)
     security_deposit_type: str  # Cash, Cheque, Bank Transfer, Name
-    security_deposit_status: str = "Held"  # Held, Refunded, Withheld
+    security_deposit_status: str = "Received"  # Received, Balance, Total Rent
     status: str = "Active"  # Active, Reserved, Completed, Cancelled
     booking_type: Optional[str] = "Individual"  # Individual, Company
     company_name: Optional[str] = None
     driver_type: Optional[str] = "Company Driver"  # Company Driver, Freelance Driver
+    driver_employee_id: Optional[int] = None
     driver_name: Optional[str] = None
     driver_phone: Optional[str] = None
     driver_cnic: Optional[str] = None
@@ -270,6 +271,7 @@ class BookingUpdate(BaseModel):
     advance_paid: Optional[float] = Field(None, ge=0)
     company_name: Optional[str] = None
     driver_type: Optional[str] = None
+    driver_employee_id: Optional[int] = None
     driver_name: Optional[str] = None
     driver_phone: Optional[str] = None
     driver_cnic: Optional[str] = None
