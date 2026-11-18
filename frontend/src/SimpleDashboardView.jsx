@@ -1,7 +1,7 @@
 import React from "react";
 import {
   CalendarPlus, Car, UserPlus, Receipt, Briefcase, Calendar,
-  CheckCircle, KeyRound, ListChecks, Wallet,
+  CheckCircle, KeyRound, ListChecks, Wallet, Handshake,
 } from "lucide-react";
 import { localTodayStr } from "./dateUtils";
 import { sumCashIn } from "./financeUtils";
@@ -19,6 +19,8 @@ export default function SimpleDashboardView({
   onAddCustomer,
   onNewReceipt,
   onAddExpense,
+  onAddPartner,
+  onAddDriver,
   goTab,
 }) {
   const today = localTodayStr();
@@ -48,6 +50,8 @@ export default function SimpleDashboardView({
     { label: "Add Customer", icon: UserPlus, onClick: onAddCustomer },
     { label: "New Receipt", icon: Receipt, onClick: onNewReceipt },
     { label: "Add Office Expense", icon: Briefcase, onClick: onAddExpense },
+    { label: "Add Partner", icon: Handshake, onClick: onAddPartner },
+    { label: "Add Driver", icon: KeyRound, onClick: onAddDriver },
     { label: "See All Bookings", icon: Calendar, onClick: () => goTab("bookings") },
   ];
 
@@ -70,7 +74,7 @@ export default function SimpleDashboardView({
       {/* Quick actions */}
       <div>
         <h3 className="text-sm font-bold uppercase tracking-wider text-[var(--text-muted)] mb-3">Quick Actions</h3>
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {actions.map((a) => (
             <button
               key={a.label}

@@ -3,7 +3,7 @@ import { localTodayStr, localDateTimeStr } from "./dateUtils";
 import { fileViewUrl, fileDownloadUrl } from "./fileUtils";
 import { 
   Car, Users, Calendar, ShieldAlert, Wrench, Wallet, Plus, 
-  Search, Trash2, Edit2, AlertTriangle, CheckCircle, Check, MessageSquare, FileText, Send, X, Clock, PenTool, TrendingUp, DollarSign, Sun, Moon, Briefcase, Menu, Eye, BarChart3, Download, Printer, PieChart, LineChart, UserPlus, Receipt, BadgeCheck, ClipboardList, ScrollText, Settings as SettingsIcon, Wifi, WifiOff, RefreshCw, Smartphone, Handshake, Sparkles, Lock
+  Search, Trash2, Edit2, AlertTriangle, CheckCircle, Check, MessageSquare, FileText, Send, X, Clock, PenTool, TrendingUp, DollarSign, Sun, Moon, Briefcase, Menu, Eye, BarChart3, Download, Printer, PieChart, LineChart, UserPlus, Receipt, BadgeCheck, ClipboardList, ScrollText, Settings as SettingsIcon, Wifi, WifiOff, RefreshCw, Smartphone, Handshake, Sparkles, Lock, KeyRound
 } from "lucide-react";
 import TenantPasswordGate from "./TenantPasswordGate";
 import QuickEventBookingModal from "./QuickEventBookingModal";
@@ -14,6 +14,8 @@ import LeadsView from "./LeadsView";
 import QuotationsView from "./QuotationsView";
 import OfficeExpensesView from "./OfficeExpensesView";
 import SimpleDashboardView from "./SimpleDashboardView";
+import SimplePartnersView from "./SimplePartnersView";
+import SimpleDriversView from "./SimpleDriversView";
 import ReceiptsView from "./ReceiptsView";
 import InvoicesLettersView from "./InvoicesLettersView";
 import SettingsView from "./SettingsView";
@@ -173,6 +175,7 @@ export default function App() {
   const simpleMode = !!branding?.feature_flags?.includes("simple_mode");
   const [receiptAddSignal, setReceiptAddSignal] = useState(0);
   const [officeAddSignal, setOfficeAddSignal] = useState(0);
+  const [partnerAddSignal, setPartnerAddSignal] = useState(0);
 
   const [cars, setCars] = useState([]);
   const [customers, setCustomers] = useState([]);
@@ -824,6 +827,8 @@ export default function App() {
               { id: "employees", label: "Employees", icon: BadgeCheck },
               { id: "maintenance", label: "Maintenance", icon: Wrench },
               { id: "office", label: "Office Maintenance", icon: Briefcase },
+              { id: "partners", label: "Partners", icon: Handshake },
+              { id: "drivers", label: "Drivers", icon: KeyRound },
               { id: "document-vault", label: "Documents", icon: FileText },
               { id: "reports", label: "Reports", icon: BarChart3 },
               { id: "analytics", label: "Analytics", icon: PieChart },
@@ -834,8 +839,11 @@ export default function App() {
             ].filter(tab => {
               if (simpleMode) {
                 // Simple Mode: only the everyday essentials stay visible.
-                return ["dashboard", "bookings", "fleet", "customers", "receipts", "employees", "office"].includes(tab.id);
+                return ["dashboard", "bookings", "fleet", "customers", "receipts", "employees", "office", "partners", "drivers"].includes(tab.id);
               }
+              // Partners/Drivers are Simple-Mode-only sections; the full
+              // software covers them under Suppliers and Employees.
+              if (tab.id === "partners" || tab.id === "drivers") return false;
               const toggleable = ["dashboard", "fleet", "customers", "leads", "quotations", "bookings", "suppliers", "receipts", "employees", "maintenance", "blacklist"];
               if (toggleable.includes(tab.id) && branding.feature_flags?.length) {
                 return branding.feature_flags.includes(tab.id);
@@ -1043,6 +1051,8 @@ export default function App() {
             onAddCustomer={() => { setEditingCustomer(null); setActiveTab("customers"); setShowCustomerModal(true); }}
             onNewReceipt={() => { setActiveTab("receipts"); setReceiptAddSignal((s) => s + 1); }}
             onAddExpense={() => { setActiveTab("office"); setOfficeAddSignal((s) => s + 1); }}
+            onAddPartner={() => { setActiveTab("partners"); setPartnerAddSignal((s) => s + 1); }}
+            onAddDriver={() => setActiveTab("drivers")}
             goTab={(tab) => setActiveTab(tab)}
           />
           ) : (
@@ -1222,6 +1232,12 @@ export default function App() {
         )}
         {activeTab === "office" && (
           <OfficeExpensesView officeExpenses={officeExpenses} fetchData={fetchData} addSignal={officeAddSignal} />
+        )}
+        {activeTab === "partners" && simpleMode && (
+          <SimplePartnersView addSignal={partnerAddSignal} />
+        )}
+        {activeTab === "drivers" && simpleMode && (
+          <SimpleDriversView />
         )}
         {activeTab === "blacklist" && (
           <BlacklistView 
