@@ -501,6 +501,30 @@ class UploadedFile(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 
+class OfficeExpense(Base):
+    """A tenant's office running costs (rent, utilities, fuel, salaries...).
+
+    Deliberately separate from booking Financials (those are customer money
+    in) and from MaintenanceLog (per-vehicle workshop costs): office expenses
+    are the agency's own overhead. The frontend folds them into the
+    Dashboard/Reports cash-out totals alongside maintenance and payouts.
+    Attachments reuse the unlimited-upload system (uploaded_files ownership
+    rows + the authenticated /api/files serving route).
+    """
+    __tablename__ = "office_expenses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    expense_date = Column(Date, nullable=False)
+    category = Column(String, nullable=False, default="Other")
+    description = Column(String, nullable=False, default="")
+    amount = Column(Float, nullable=False, default=0.0)
+    paid_by = Column(String, nullable=True)
+    payment_method = Column(String, nullable=False, default="Cash")
+    attachments = Column(JSON, nullable=False, default=list)  # [{name, file_path}]
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
 class DocumentCounter(Base):
     """Per-tenant sequential document numbers that are never re-issued.
 

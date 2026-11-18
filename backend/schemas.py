@@ -761,6 +761,36 @@ class Quotation(QuotationBase):
     class Config:
         from_attributes = True
 
+# Office Maintenance (office running expenses)
+class OfficeExpenseBase(BaseModel):
+    expense_date: date
+    category: str = "Other"
+    description: str = ""
+    amount: float = Field(..., gt=0)
+    paid_by: Optional[str] = None
+    payment_method: str = "Cash"
+    attachments: Optional[Any] = []
+
+class OfficeExpenseCreate(OfficeExpenseBase):
+    pass
+
+class OfficeExpenseUpdate(BaseModel):
+    expense_date: Optional[date] = None
+    category: Optional[str] = None
+    description: Optional[str] = None
+    amount: Optional[float] = Field(None, gt=0)
+    paid_by: Optional[str] = None
+    payment_method: Optional[str] = None
+    attachments: Optional[Any] = None
+
+class OfficeExpense(OfficeExpenseBase):
+    id: int
+    tenant_id: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
 # Payment & Deposit Receipts
 class ReceiptBase(BaseModel):
     receipt_number: Optional[str] = None

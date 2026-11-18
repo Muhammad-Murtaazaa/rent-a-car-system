@@ -1698,6 +1698,7 @@ def remove_tenant(
         models.BookedCar, models.Financial, models.Receipt,
         models.InvestorPayout, models.ShareholderPayout, models.EmployeePayment,
         models.Booking, models.MaintenanceLog, models.Lead, models.Quotation,
+        models.OfficeExpense, models.UploadedFile,
         models.VehicleInvoice, models.OfficialLetter,
         models.SupplierDeal, models.PartnerAgency, models.ChauffeurDriver,
         models.Employee, models.Customer, models.Car,
@@ -2177,6 +2178,40 @@ def delete_quotation(quotation_id: int, db: Session = Depends(get_db), tenant_co
     if not deleted:
         raise HTTPException(status_code=404, detail="Quotation not found")
     return {"message": "Quotation deleted successfully"}
+
+# Office Maintenance — office running expenses
+@app.get("/api/office-expenses", response_model=List[schemas.OfficeExpense])
+def list_office_expenses(skip: int = Query(0, ge=0), limit: int = Query(1000, ge=1, le=10000), db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    return crud.get_office_expenses(db, tenant_id=tenant_context["tenant_id"], skip=skip, limit=limit)
+
+@app.post("/api/office-expenses", response_model=schemas.OfficeExpense)
+def create_office_expense(expense: schemas.OfficeExpenseCreate, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    return crud.create_office_expense(db, expense=expense, tenant_id=tenant_context["tenant_id"])
+
+@app.put("/api/office-expenses/{expense_id}", response_model=schemas.OfficeExpense)
+def update_office_expense(expense_id: int, expense_update: schemas.OfficeExpenseUpdate, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    updated = crud.update_office_expense(db, expense_id=expense_id, expense_update=expense_update, tenant_id=tenant_context["tenant_id"])
+    if not updated:
+        raise HTTPException(status_code=404, detail="Office expense not found")
+    return updated
+
+@app.delete("/api/office-expenses/{expense_id}")
+def delete_office_expense(expense_id: int, db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    deleted = crud.delete_office_expense(db, expense_id=expense_id, tenant_id=tenant_context["tenant_id"])
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Office expense not found")
+    return {"message": "Office expense deleted successfully"}
+
+@app.post("/api/uploads")
+def upload_generic_file(file: UploadFile = File(...), db: Session = Depends(get_db), tenant_context: dict = Depends(get_tenant_context)):
+    """Generic attachment upload (office expenses and future surfaces).
+
+    Same unlimited rules as every other upload: any file type, only a
+    50 MB per-file ceiling; the file is registered to the caller's tenant
+    and served back through the authenticated /api/files route.
+    """
+    url = upload_file_securely(file, db, tenant_context["tenant_id"])
+    return {"file_path": url, "filename": file.filename}
 
 
 # --- Receipts Endpoints ---

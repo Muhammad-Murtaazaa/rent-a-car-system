@@ -1120,6 +1120,48 @@ def delete_quotation(db: Session, quotation_id: int, tenant_id: str):
     return db_q
 
 
+# --- Office Expenses CRUD (Office Maintenance section) ---
+def get_office_expenses(db: Session, tenant_id: str, skip: int = 0, limit: int = 1000):
+    return (
+        db.query(models.OfficeExpense)
+        .filter(models.OfficeExpense.tenant_id == tenant_id)
+        .order_by(models.OfficeExpense.expense_date.desc(), models.OfficeExpense.id.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+def get_office_expense(db: Session, expense_id: int, tenant_id: str):
+    return db.query(models.OfficeExpense).filter(models.OfficeExpense.id == expense_id, models.OfficeExpense.tenant_id == tenant_id).first()
+
+def create_office_expense(db: Session, expense: schemas.OfficeExpenseCreate, tenant_id: str):
+    data = expense.dict()
+    if not isinstance(data.get("attachments"), list):
+        data["attachments"] = []
+    db_e = models.OfficeExpense(**data, tenant_id=tenant_id)
+    db.add(db_e)
+    db.commit()
+    db.refresh(db_e)
+    return db_e
+
+def update_office_expense(db: Session, expense_id: int, expense_update: schemas.OfficeExpenseUpdate, tenant_id: str):
+    db_e = get_office_expense(db, expense_id, tenant_id)
+    if not db_e:
+        return None
+    for key, value in expense_update.dict(exclude_unset=True).items():
+        setattr(db_e, key, value)
+    db.commit()
+    db.refresh(db_e)
+    return db_e
+
+def delete_office_expense(db: Session, expense_id: int, tenant_id: str):
+    db_e = get_office_expense(db, expense_id, tenant_id)
+    if db_e:
+        db.delete(db_e)
+        db.commit()
+    return db_e
+
+
 # --- Receipts CRUD ---
 def get_receipts(db: Session, tenant_id: str, skip: int = 0, limit: int = 1000):
     return (

@@ -12,6 +12,7 @@ import SuperAdminDashboard from "./SuperAdminDashboard";
 import EmployeesView from "./EmployeesView";
 import LeadsView from "./LeadsView";
 import QuotationsView from "./QuotationsView";
+import OfficeExpensesView from "./OfficeExpensesView";
 import ReceiptsView from "./ReceiptsView";
 import InvoicesLettersView from "./InvoicesLettersView";
 import SettingsView from "./SettingsView";
@@ -25,6 +26,7 @@ import {
   sumOutstandingFromBookings,
   sumMaintenanceOut,
   sumPayoutsOut,
+  sumOfficeExpensesOut,
   operatingNet,
   netEarnings,
   monthlyCashflow,
@@ -176,6 +178,7 @@ export default function App() {
   const [employees, setEmployees] = useState([]);
   const [leads, setLeads] = useState([]);
   const [quotations, setQuotations] = useState([]);
+  const [officeExpenses, setOfficeExpenses] = useState([]);
   const [receipts, setReceipts] = useState([]);
   const [vehicleInvoices, setVehicleInvoices] = useState([]);
   const [officialLetters, setOfficialLetters] = useState([]);
@@ -292,7 +295,7 @@ export default function App() {
       const q = "limit=10000";
       const [
         carsRes, custRes, bookingsRes, maintRes, blRes,
-        alertsRes, finRes, invRes, shRes, empRes, leadsRes, quotesRes, rcptRes, vInvRes, ltrRes, suppDealsRes
+        alertsRes, finRes, invRes, shRes, empRes, leadsRes, quotesRes, rcptRes, vInvRes, ltrRes, suppDealsRes, officeExpRes
       ] = await Promise.all([
         fetch(`/api/cars?${q}`),
         fetch(`/api/customers?${q}`),
@@ -310,6 +313,7 @@ export default function App() {
         fetch(`/api/vehicle-invoices?limit=1000`),
         fetch(`/api/letters?limit=1000`),
         fetch(`/api/supplier-deals?limit=1000`),
+        fetch(`/api/office-expenses?limit=10000`),
       ]);
 
       if (carsRes.ok) {
@@ -334,6 +338,7 @@ export default function App() {
       if (vInvRes.ok) setVehicleInvoices(await vInvRes.json());
       if (ltrRes.ok) setOfficialLetters(await ltrRes.json());
       if (suppDealsRes.ok) setSupplierDeals(await suppDealsRes.json());
+      if (officeExpRes.ok) setOfficeExpenses(await officeExpRes.json());
     } catch (err) {
       console.error("Error loading API data:", err);
     }
@@ -348,7 +353,7 @@ export default function App() {
 
   // Gentle 30s background sync to keep VPS CPU/RAM minimal
   useEffect(() => {
-    const liveTabs = ["dashboard", "reports", "analytics", "investors", "shareholders", "bookings", "maintenance", "leads", "quotations", "receipts", "employees"];
+    const liveTabs = ["dashboard", "reports", "analytics", "investors", "shareholders", "bookings", "maintenance", "office", "leads", "quotations", "receipts", "employees"];
     if (!liveTabs.includes(activeTab)) return;
     const id = setInterval(fetchData, 30000);
     return () => clearInterval(id);
@@ -810,6 +815,7 @@ export default function App() {
               { id: "receipts", label: "Receipts", icon: Receipt },
               { id: "employees", label: "Employees", icon: BadgeCheck },
               { id: "maintenance", label: "Maintenance", icon: Wrench },
+              { id: "office", label: "Office Maintenance", icon: Briefcase },
               { id: "document-vault", label: "Documents", icon: FileText },
               { id: "reports", label: "Reports", icon: BarChart3 },
               { id: "analytics", label: "Analytics", icon: PieChart },
@@ -1019,6 +1025,7 @@ export default function App() {
             bookings={bookings} 
             financials={financials} 
             maintenance={maintenance}
+            officeExpenses={officeExpenses}
             investors={investors}
             shareholders={shareholders}
             reportDate={reportDate}
@@ -1185,6 +1192,9 @@ export default function App() {
             setShowModal={setShowMaintenanceModal}
           />
         )}
+        {activeTab === "office" && (
+          <OfficeExpensesView officeExpenses={officeExpenses} fetchData={fetchData} />
+        )}
         {activeTab === "blacklist" && (
           <BlacklistView 
             blacklist={blacklist} 
@@ -1220,6 +1230,7 @@ export default function App() {
             customers={customers}
             financials={financials}
             maintenance={maintenance}
+            officeExpenses={officeExpenses}
             investors={investors}
           />
         )}
@@ -1230,6 +1241,7 @@ export default function App() {
             customers={customers}
             financials={financials}
             maintenance={maintenance}
+            officeExpenses={officeExpenses}
             investors={investors}
           />
         )}
@@ -1503,7 +1515,7 @@ export default function App() {
 // 1. DASHBOARD COMPONENT
 // ==========================================
 function DashboardView({ 
-  alerts, cars, bookings, financials, maintenance, investors = [], shareholders = [],
+  alerts, cars, bookings, financials, maintenance, officeExpenses = [], investors = [], shareholders = [],
   reportDate, setReportDate, setReceiptBooking, setShowAdvanceModal, clearAdvanceSignature,
   onOpenQuickBooking
 }) {
@@ -1523,11 +1535,12 @@ function DashboardView({
   const totalRevenue = sumCashIn(financials);
   const totalBalanceDue = sumOutstandingFromBookings(bookings, financials);
   const totalMaintCost = sumMaintenanceOut(maintenance);
+  const totalOfficeCost = sumOfficeExpensesOut(officeExpenses);
   const totalPayouts = sumPayoutsOut(payouts);
-  const opNet = operatingNet(financials, maintenance);
-  const net = netEarnings(financials, maintenance, payouts);
-  const daily = dailyCashSummary(financials, maintenance, bookings, reportDate, payouts);
-  const monthSeries = monthlyCashflow(financials, maintenance, 6, payouts);
+  const opNet = operatingNet(financials, maintenance, officeExpenses);
+  const net = netEarnings(financials, maintenance, payouts, officeExpenses);
+  const daily = dailyCashSummary(financials, maintenance, bookings, reportDate, payouts, officeExpenses);
+  const monthSeries = monthlyCashflow(financials, maintenance, 6, payouts, officeExpenses);
 
   const heldDepositsBookings = bookings.filter(b => (b.security_deposit_status === "Received" || b.security_deposit_status === "Held") && (b.status === "Active" || b.status === "Reserved"));
 
@@ -1599,12 +1612,13 @@ function DashboardView({
       </div>
 
       {/* Financial Analytics Summary Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-6">
         {[
           { label: "Gross Receipts", value: `PKR ${totalRevenue.toLocaleString()}`, icon: DollarSign, color: "text-emerald-700 dark:text-emerald-400" },
           { label: "Outstanding Dues", value: `PKR ${totalBalanceDue.toLocaleString()}`, icon: TrendingUp, color: "text-rose-700 dark:text-rose-400" },
           { label: "Maintenance Outflow", value: `PKR ${totalMaintCost.toLocaleString()}`, icon: Wrench, color: "text-amber-700 dark:text-amber-400" },
-          { label: "Partner Payouts", value: `PKR ${totalPayouts.toLocaleString()}`, icon: Briefcase, color: "text-blue-700 dark:text-blue-400" },
+          { label: "Office Expenses", value: `PKR ${totalOfficeCost.toLocaleString()}`, icon: Briefcase, color: "text-purple-700 dark:text-purple-400" },
+          { label: "Partner Payouts", value: `PKR ${totalPayouts.toLocaleString()}`, icon: Handshake, color: "text-blue-700 dark:text-blue-400" },
           { label: "Net Cash Retained", value: `PKR ${net.toLocaleString()}`, icon: CheckCircle, color: "text-teal-700 dark:text-teal-400" }
         ].map((card, i) => (
           <Card key={i} className="shadow-sm hover:shadow-md transition-shadow">
@@ -1907,6 +1921,10 @@ function DashboardView({
             <div className="flex justify-between py-1 border-b border-[var(--border-color)]/45">
               <span className="text-[var(--text-muted)]">Investor Payouts Outflow:</span>
               <span className="text-blue-700 dark:text-blue-400 font-bold">- PKR {(daily.dailyPayoutExpense || 0).toLocaleString()}</span>
+            </div>
+            <div className="flex justify-between py-1 border-b border-[var(--border-color)]/45">
+              <span className="text-[var(--text-muted)]">Office Expenses Outflow:</span>
+              <span className="text-purple-700 dark:text-purple-400 font-bold">- PKR {(daily.dailyOfficeExpense || 0).toLocaleString()}</span>
             </div>
             <div className="flex justify-between pt-3 text-sm font-bold border-t border-[var(--border-color)]">
               <span>Estimated Net Earnings:</span>
@@ -8181,7 +8199,7 @@ function ShareholdersView({ shareholders, cars, financials = [], bookings = [], 
   );
 }
 
-function ReportsView({ cars, bookings, customers, financials, maintenance, investors }) {
+function ReportsView({ cars, bookings, customers, financials, maintenance, investors, officeExpenses = [] }) {
   const [reportCategory, setReportCategory] = useState("financials");
   const [dateRange, setDateRange] = useState("this_month");
   const [startDate, setStartDate] = useState("");
@@ -8277,14 +8295,16 @@ function ReportsView({ cars, bookings, customers, financials, maintenance, inves
   const totalRevenue = sumCashIn(rangeFinancialsForCar);
   const totalMaint = sumMaintenanceOut(filteredMaintenance);
   const totalPayouts = carFilter === "all" ? sumPayoutsOut(filteredPayouts) : 0;
-  const totalExpenses = totalMaint + totalPayouts;
+  const totalOffice = carFilter === "all" ? sumOfficeExpensesOut(officeExpenses) : 0;
+  const totalExpenses = totalMaint + totalPayouts + totalOffice;
   const netProfit = totalRevenue - totalExpenses;
   const portfolio = investorPortfolioTotals(investors);
   const cashflowLedger = buildCashflowLedger(
     rangeFinancialsForCar,
     filteredMaintenance,
     bookings,
-    carFilter === "all" ? filteredPayouts : []
+    carFilter === "all" ? filteredPayouts : [],
+    carFilter === "all" ? officeExpenses : []
   ).filter((row) => {
     if (carFilter === "all") return true;
     if (row.category === "Investor Payout") return false;
@@ -8872,10 +8892,10 @@ function ReportsView({ cars, bookings, customers, financials, maintenance, inves
   );
 }
 
-function DataVisualizationsView({ cars, bookings, customers, financials, maintenance, investors = [] }) {
+function DataVisualizationsView({ cars, bookings, customers, financials, maintenance, investors = [], officeExpenses = [] }) {
   const payouts = flattenInvestorPayouts(investors);
   const portfolio = investorPortfolioTotals(investors);
-  const lineMonths = monthlyCashflow(financials, maintenance, 6, payouts);
+  const lineMonths = monthlyCashflow(financials, maintenance, 6, payouts, officeExpenses);
   const maxTrendVal = Math.max(...lineMonths.map((m) => Math.max(m.revenue, m.expenses)), 1);
 
   // Fleet status pie. Count each status exactly: the old formula derived
@@ -8908,7 +8928,7 @@ function DataVisualizationsView({ cars, bookings, customers, financials, mainten
   const highestRevCar = topCarsList[0];
   const fleetUtilizationRate = Math.round((rentedCount / totalCars) * 100);
   const totalRevSum = sumCashIn(financials);
-  const totalExpSum = sumMaintenanceOut(maintenance) + sumPayoutsOut(payouts);
+  const totalExpSum = sumMaintenanceOut(maintenance) + sumPayoutsOut(payouts) + sumOfficeExpensesOut(officeExpenses);
   const allTimeNet = netEarnings(financials, maintenance, payouts);
   const marginPct = totalRevSum > 0 ? Math.round((allTimeNet / totalRevSum) * 100) : 0;
   const expensePct = totalRevSum > 0 ? Math.round((totalExpSum / totalRevSum) * 100) : 0;

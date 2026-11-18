@@ -106,14 +106,19 @@ export function sumPayoutsOut(payouts) {
   return (payouts || []).reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
 }
 
-/** Operating net before investor disbursements */
-export function operatingNet(financials, maintenance) {
-  return sumCashIn(financials) - sumMaintenanceOut(maintenance);
+/** Cash out: office running expenses (Office Maintenance section) */
+export function sumOfficeExpensesOut(officeExpenses) {
+  return (officeExpenses || []).reduce((acc, e) => acc + (Number(e.amount) || 0), 0);
 }
 
-/** Cash retained after maintenance + investor payouts */
-export function netEarnings(financials, maintenance, payouts = []) {
-  return sumCashIn(financials) - sumMaintenanceOut(maintenance) - sumPayoutsOut(payouts);
+/** Operating net before investor disbursements */
+export function operatingNet(financials, maintenance, officeExpenses = []) {
+  return sumCashIn(financials) - sumMaintenanceOut(maintenance) - sumOfficeExpensesOut(officeExpenses);
+}
+
+/** Cash retained after maintenance + office expenses + investor payouts */
+export function netEarnings(financials, maintenance, payouts = [], officeExpenses = []) {
+  return sumCashIn(financials) - sumMaintenanceOut(maintenance) - sumPayoutsOut(payouts) - sumOfficeExpensesOut(officeExpenses);
 }
 
 export function filterFinancialsByRange(financials, start, end) {
@@ -132,9 +137,9 @@ export function filterPayoutsByRange(payouts, start, end) {
  * 6-month cash-in vs cash-out series for charts.
  * expenses = maintenance + investor payouts
  */
-export function monthlyCashflow(financials, maintenance, months = 6, payouts = []) {
+export function monthlyCashflow(financials, maintenance, months = 6, payouts = [], officeExpenses = []) {
   const keys = lastNMonthKeys(months);
-  const series = keys.map((key) => ({ key, revenue: 0, expenses: 0, maint: 0, payouts: 0 }));
+  const series = keys.map((key) => ({ key, revenue: 0, expenses: 0, maint: 0, payouts: 0, office: 0 }));
   const byKey = Object.fromEntries(series.map((m) => [m.key, m]));
 
   for (const f of financials || []) {
@@ -162,6 +167,17 @@ export function monthlyCashflow(financials, maintenance, months = 6, payouts = [
     if (row) {
       const a = Number(p.amount) || 0;
       row.payouts += a;
+      row.expenses += a;
+    }
+  }
+
+  for (const e of officeExpenses || []) {
+    const d = parseDate(e.expense_date);
+    if (!d) continue;
+    const row = byKey[monthKey(d)];
+    if (row) {
+      const a = Number(e.amount) || 0;
+      row.office += a;
       row.expenses += a;
     }
   }
@@ -253,7 +269,7 @@ export function chauffeurOutflowForDate(bookings, reportDate) {
     .reduce((acc, b) => acc + (Number(b.chauffeur_daily_wage) || 0), 0);
 }
 
-export function dailyCashSummary(financials, maintenance, bookings, reportDate, payouts = []) {
+export function dailyCashSummary(financials, maintenance, bookings, reportDate, payouts = [], officeExpenses = []) {
   const target = parseDate(reportDate);
   const targetStr = target ? target.toDateString() : "";
 
@@ -269,14 +285,19 @@ export function dailyCashSummary(financials, maintenance, bookings, reportDate, 
     .filter((p) => parseDate(p.payout_date)?.toDateString() === targetStr)
     .reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
 
+  const dailyOfficeExpense = (officeExpenses || [])
+    .filter((e) => parseDate(e.expense_date)?.toDateString() === targetStr)
+    .reduce((acc, e) => acc + (Number(e.amount) || 0), 0);
+
   const dailyDriverExpense = chauffeurOutflowForDate(bookings, reportDate);
-  const netDaily = dailyIncome - dailyDriverExpense - dailyMaintExpense - dailyPayoutExpense;
+  const netDaily = dailyIncome - dailyDriverExpense - dailyMaintExpense - dailyPayoutExpense - dailyOfficeExpense;
 
   return {
     dailyIncome,
     dailyDriverExpense,
     dailyMaintExpense,
     dailyPayoutExpense,
+    dailyOfficeExpense,
     netDaily,
   };
 }
@@ -285,7 +306,7 @@ export function dailyCashSummary(financials, maintenance, bookings, reportDate, 
  * Unified ledger: payments (Cash In) + maintenance + investor payouts (Cash Out).
  * Sorted newest first.
  */
-export function buildCashflowLedger(financials, maintenance, bookings = [], payouts = []) {
+export function buildCashflowLedger(financials, maintenance, bookings = [], payouts = [], officeExpenses = []) {
   const bookingMap = Object.fromEntries((bookings || []).map((b) => [b.id, b]));
   const rows = [];
 
@@ -350,6 +371,19 @@ export function buildCashflowLedger(financials, maintenance, bookings = [], payo
       amount: Number(p.amount) || 0,
       investor_id: p.investor_id,
       shareholder_id: p.shareholder_id,
+    });
+  }
+
+  for (const e of officeExpenses || []) {
+    rows.push({
+      id: `OFF-${e.id}`,
+      sortKey: parseDate(e.expense_date)?.getTime() ?? 0,
+      date: e.expense_date,
+      description: [e.category, e.description, e.paid_by].filter(Boolean).join(" · ") || "Office expense",
+      type: "Cash Out",
+      category: "Office Expense",
+      amount: Number(e.amount) || 0,
+      payment_method: e.payment_method,
     });
   }
 
