@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { Briefcase, Plus, Search, Trash2, Edit2, X, Eye, Download, Paperclip } from "lucide-react";
 import { localTodayStr } from "./dateUtils";
 import { fileViewUrl, fileDownloadUrl } from "./fileUtils";
@@ -12,7 +12,7 @@ const PRESET_CATEGORIES = [
 ];
 const PAYMENT_METHODS = ["Cash", "Cheque", "Bank Transfer", "Online Transfer"];
 
-export default function OfficeExpensesView({ officeExpenses = [], fetchData }) {
+export default function OfficeExpensesView({ officeExpenses = [], fetchData, addSignal = 0 }) {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [dateFrom, setDateFrom] = useState("");
@@ -73,6 +73,12 @@ export default function OfficeExpensesView({ officeExpenses = [], fetchData }) {
     setForm(emptyForm);
     setShowModal(true);
   };
+
+  // Simple Mode quick action: open the add-expense form when the signal bumps.
+  useEffect(() => {
+    if (addSignal) openAdd();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addSignal]);
 
   const openEdit = (e) => {
     setEditing(e);

@@ -13,6 +13,7 @@ import EmployeesView from "./EmployeesView";
 import LeadsView from "./LeadsView";
 import QuotationsView from "./QuotationsView";
 import OfficeExpensesView from "./OfficeExpensesView";
+import SimpleDashboardView from "./SimpleDashboardView";
 import ReceiptsView from "./ReceiptsView";
 import InvoicesLettersView from "./InvoicesLettersView";
 import SettingsView from "./SettingsView";
@@ -165,6 +166,13 @@ export default function App() {
     primary_theme_color: "#0d9488",
     feature_flags: ["dashboard", "fleet", "customers", "bookings", "maintenance", "blacklist", "whatsapp_api", "advanced_analytics", "chauffeur_module"]
   });
+  // Simple Mode: a per-tenant feature flag ("simple_mode" in the tenant's
+  // feature_flags, set from Super Admin) that swaps in a minimal sidebar
+  // and a big-button quick-actions dashboard. Tenants without the flag see
+  // the full software exactly as before.
+  const simpleMode = !!branding?.feature_flags?.includes("simple_mode");
+  const [receiptAddSignal, setReceiptAddSignal] = useState(0);
+  const [officeAddSignal, setOfficeAddSignal] = useState(0);
 
   const [cars, setCars] = useState([]);
   const [customers, setCustomers] = useState([]);
@@ -824,6 +832,10 @@ export default function App() {
               { id: "shareholders", label: "Shareholders", icon: Wallet },
               { id: "settings", label: "Settings & Letterhead", icon: SettingsIcon }
             ].filter(tab => {
+              if (simpleMode) {
+                // Simple Mode: only the everyday essentials stay visible.
+                return ["dashboard", "bookings", "fleet", "customers", "receipts", "employees", "office"].includes(tab.id);
+              }
               const toggleable = ["dashboard", "fleet", "customers", "leads", "quotations", "bookings", "suppliers", "receipts", "employees", "maintenance", "blacklist"];
               if (toggleable.includes(tab.id) && branding.feature_flags?.length) {
                 return branding.feature_flags.includes(tab.id);
@@ -847,6 +859,7 @@ export default function App() {
 
         <div className="pt-3 mt-3 border-t border-[var(--border-color)] space-y-2.5">
           {/* Pinned Quick Access to Settings & Letterhead */}
+          {!simpleMode && (
           <button
             type="button"
             onClick={() => {
@@ -865,6 +878,7 @@ export default function App() {
             </div>
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-teal-500/15 text-teal-400 font-bold border border-teal-500/25">Setup</span>
           </button>
+          )}
 
           {/* Operator / Platform Demo View (only visible on racms.omnysync.com root default workspace) */}
           {!isTenantWorkspace && (
@@ -1018,7 +1032,20 @@ export default function App() {
         )}
 
         {/* TAB CONTENTS */}
-        {activeTab === "dashboard" && (
+        {activeTab === "dashboard" && (simpleMode ? (
+          <SimpleDashboardView
+            branding={branding}
+            cars={cars}
+            bookings={bookings}
+            financials={financials}
+            onNewBooking={() => setShowQuickEventBookingModal(true)}
+            onAddCar={() => { setEditingCar(null); setActiveTab("fleet"); setShowCarModal(true); }}
+            onAddCustomer={() => { setEditingCustomer(null); setActiveTab("customers"); setShowCustomerModal(true); }}
+            onNewReceipt={() => { setActiveTab("receipts"); setReceiptAddSignal((s) => s + 1); }}
+            onAddExpense={() => { setActiveTab("office"); setOfficeAddSignal((s) => s + 1); }}
+            goTab={(tab) => setActiveTab(tab)}
+          />
+          ) : (
           <DashboardView 
             alerts={alerts} 
             cars={cars} 
@@ -1035,7 +1062,7 @@ export default function App() {
             clearAdvanceSignature={clearAdvanceSignature}
             onOpenQuickBooking={() => setShowQuickEventBookingModal(true)}
           />
-        )}
+          ))}
         {activeTab === "fleet" && (
           <FleetView 
             cars={cars} 
@@ -1136,6 +1163,7 @@ export default function App() {
             bookings={bookings}
             branding={branding}
             fetchData={fetchData}
+            addSignal={receiptAddSignal}
           />
         )}
         {activeTab === "employees" && (
@@ -1193,7 +1221,7 @@ export default function App() {
           />
         )}
         {activeTab === "office" && (
-          <OfficeExpensesView officeExpenses={officeExpenses} fetchData={fetchData} />
+          <OfficeExpensesView officeExpenses={officeExpenses} fetchData={fetchData} addSignal={officeAddSignal} />
         )}
         {activeTab === "blacklist" && (
           <BlacklistView 

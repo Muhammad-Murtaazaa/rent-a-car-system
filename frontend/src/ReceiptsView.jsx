@@ -1,9 +1,9 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { localTodayStr, localDateTimeStr } from "./dateUtils";
 import { jsPDF } from "jspdf";
 import { Receipt, Plus, Search, Trash2, X, Download, Send, Printer } from "lucide-react";
 
-export default function ReceiptsView({ receipts = [], bookings = [], branding, fetchData }) {
+export default function ReceiptsView({ receipts = [], bookings = [], branding, fetchData, addSignal = 0 }) {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("All");
   const [showModal, setShowModal] = useState(false);
@@ -23,6 +23,15 @@ export default function ReceiptsView({ receipts = [], bookings = [], branding, f
     notes: ""
   };
   const [form, setForm] = useState(emptyForm);
+
+  // Simple Mode quick action: open the new-receipt form when the signal bumps.
+  useEffect(() => {
+    if (addSignal) {
+      setForm(emptyForm);
+      setShowModal(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addSignal]);
 
   const handleBookingPick = (bookingId) => {
     const b = bookings.find(item => String(item.id) === String(bookingId));
