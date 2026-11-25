@@ -1,7 +1,7 @@
 import { jsPDF } from "jspdf";
 import { fileViewUrl } from "./fileUtils";
 
-function hexToRgb(hex) {
+export function hexToRgb(hex) {
   const clean = (hex || "#e68a1e").replace("#", "");
   if (clean.length === 3) {
     return [
@@ -20,7 +20,7 @@ function hexToRgb(hex) {
   return [230, 138, 30];
 }
 
-async function loadLogoDataUrl(url) {
+export async function loadLogoDataUrl(url) {
   if (!url) return null;
   try {
     const res = await fetch(fileViewUrl(url));
@@ -37,11 +37,12 @@ async function loadLogoDataUrl(url) {
   }
 }
 
-function getAgencyInfo(branding) {
+export function getAgencyInfo(branding) {
   const s = branding?.branding_settings || {};
   return {
     name: branding?.name || "Rent A Car Management System",
     logo_url: branding?.logo_url || "",
+    letterhead: s.letterhead === true || s.letterhead === "true",
     tagline: s.tagline || "TOURS & TRAVELS",
     address: s.address || "Lahore, Pakistan",
     phone: s.support_phone || "0300-1234567",
@@ -57,8 +58,73 @@ function getAgencyInfo(branding) {
   };
 }
 
+// Letterhead header, matching a printed letterhead sheet: the agency
+// logo centered at the top (name + tagline as text when there is no
+// logo), with an accent rule underneath. Returns the rule's Y.
+export function drawLetterheadHeader(doc, agency, logoDataUrl, pageWidth = 210, maxLogoW = 62) {
+  const [r, g, b] = agency.accentRgb;
+  let ruleY = 0;
+  if (logoDataUrl) {
+    try {
+      const props = doc.getImageProperties(logoDataUrl);
+      const aspect = props.width / props.height;
+      let w = maxLogoW;
+      let h = w / aspect;
+      const maxH = 26;
+      if (h > maxH) {
+        h = maxH;
+        w = h * aspect;
+      }
+      doc.addImage(logoDataUrl, (pageWidth - w) / 2, 7, w, h, undefined, "FAST");
+      ruleY = 7 + h + 4;
+    } catch {
+      ruleY = 0;
+    }
+  }
+  if (!ruleY) {
+    doc.setTextColor(25, 25, 28);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(17);
+    doc.text((agency.name || "").toUpperCase(), pageWidth / 2, 19, { align: "center" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor(90, 90, 100);
+    doc.text((agency.tagline || "").toUpperCase(), pageWidth / 2, 25.5, { align: "center" });
+    ruleY = 31;
+  }
+  doc.setDrawColor(r, g, b);
+  doc.setLineWidth(0.8);
+  doc.line(10, ruleY, pageWidth - 10, ruleY);
+  return ruleY;
+}
+
+// Letterhead footer strip: an accent rule with the agency's address,
+// phone and website in one line, like the bottom of a letterhead sheet.
+export function drawLetterheadFooterStrip(doc, agency, pageWidth = 210, pageHeight = 297) {
+  const [r, g, b] = agency.accentRgb;
+  const ruleY = pageHeight - 15;
+  doc.setDrawColor(r, g, b);
+  doc.setLineWidth(0.8);
+  doc.line(10, ruleY, pageWidth - 10, ruleY);
+  doc.setTextColor(35, 35, 40);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(pageWidth < 200 ? 6.8 : 8.5);
+  doc.text(agency.address || "", 10, ruleY + 7);
+  doc.text(agency.phone || "", pageWidth / 2, ruleY + 7, { align: "center" });
+  doc.text(agency.website || "", pageWidth - 10, ruleY + 7, { align: "right" });
+}
+
 function drawDocChrome(doc, titleTop, titleBottom, agency, logoDataUrl) {
   const [r, g, b] = agency.accentRgb;
+
+  if (agency.letterhead) {
+    const ruleY = drawLetterheadHeader(doc, agency, logoDataUrl, 210);
+    doc.setTextColor(25, 25, 28);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(15);
+    doc.text(`${titleTop} ${titleBottom}`, 18, ruleY + 9);
+    return;
+  }
 
   // Top-left slanted accent ribbon
   doc.setFillColor(r, g, b);
@@ -113,6 +179,11 @@ function drawFooter(doc, agency, termsText) {
   doc.setFontSize(34);
   doc.text("Thank You!", 190, 260, { align: "right" });
 
+  if (agency.letterhead) {
+    drawLetterheadFooterStrip(doc, agency, 210, 297);
+    return;
+  }
+
   // Bottom bar (Dark + Accent Slant)
   doc.setFillColor(30, 30, 34);
   doc.rect(0, 281, 138, 16, "F");
@@ -132,6 +203,54 @@ export async function generateLetterheadPDF(letter, branding) {
   const agency = getAgencyInfo(branding);
   const [r, g, b] = agency.accentRgb;
   const logoDataUrl = await loadLogoDataUrl(agency.logo_url);
+
+  if (agency.letterhead) {
+    // Print on the agency's own letterhead design: logo + rule header,
+    // plain body, signature line, contact strip footer.
+    drawLetterheadHeader(doc, agency, logoDataUrl, 210);
+    doc.setTextColor(30, 30, 35);
+    let ly = 58;
+    if (letter?.letter_number || letter?.letter_date) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      if (letter.letter_number) doc.text(`Ref: ${letter.letter_number}`, 18, ly);
+      if (letter.letter_date) doc.text(`Date: ${letter.letter_date}`, 192, ly, { align: "right" });
+      ly += 12;
+    }
+    if (letter?.recipient) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.text("To:", 18, ly);
+      doc.setFont("helvetica", "normal");
+      doc.text(letter.recipient, 28, ly);
+      ly += 10;
+    }
+    if (letter?.subject) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.text(`Subject: ${letter.subject}`, 18, ly);
+      ly += 12;
+    }
+    if (letter?.body) {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10.5);
+      const lines = doc.splitTextToSize(letter.body, 174);
+      doc.text(lines, 18, ly);
+    }
+    doc.setTextColor(20, 20, 22);
+    doc.setFont("times", "bold");
+    doc.setFontSize(13);
+    const sigText = agency.sign_label || "sign";
+    doc.text(sigText, 18, 255);
+    const sigWidth = doc.getTextWidth(sigText);
+    doc.setDrawColor(20, 20, 22);
+    doc.setLineWidth(0.7);
+    doc.line(20 + sigWidth, 256, 62 + sigWidth, 256);
+    drawLetterheadFooterStrip(doc, agency, 210, 297);
+    const lfname = letter?.letter_number ? `Letterhead_${letter.letter_number}.pdf` : "Official_Letterhead.pdf";
+    doc.save(lfname);
+    return;
+  }
 
   // Top accent banner
   doc.setFillColor(r, g, b);

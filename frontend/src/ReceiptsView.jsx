@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { localTodayStr, localDateTimeStr } from "./dateUtils";
 import { jsPDF } from "jspdf";
 import { Receipt, Plus, Search, Trash2, X, Download, Send, Printer } from "lucide-react";
+import { getAgencyInfo, loadLogoDataUrl, drawLetterheadHeader, drawLetterheadFooterStrip } from "./pdfTemplates";
 
 export default function ReceiptsView({ receipts = [], bookings = [], branding, fetchData, addSignal = 0 }) {
   const [search, setSearch] = useState("");
@@ -97,25 +98,38 @@ export default function ReceiptsView({ receipts = [], bookings = [], branding, f
     }
   };
 
-  const downloadReceiptPDF = (r) => {
+  const downloadReceiptPDF = async (r) => {
     const doc = new jsPDF({ format: "a5", orientation: "portrait" });
     const brand = (branding?.name || "Rent A Car Management System").toUpperCase();
     const phone = branding?.branding_settings?.support_phone || "";
+    const agency = getAgencyInfo(branding);
+    const isLetterhead = agency.letterhead;
+    let y = 42;
 
-    doc.setFillColor(13, 148, 136);
-    doc.rect(0, 0, 148, 30, "F");
-    doc.setTextColor(255, 255, 255);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(13);
-    doc.text(brand, 10, 13);
-    doc.setFontSize(9);
-    doc.setFont("helvetica", "normal");
-    doc.text(`OFFICIAL ${r.receipt_type.toUpperCase()} RECEIPT`, 10, 21);
-    doc.text(`#${r.receipt_number || r.id}`, 115, 13);
+    if (isLetterhead) {
+      const logoDataUrl = await loadLogoDataUrl(agency.logo_url);
+      const ruleY = drawLetterheadHeader(doc, agency, logoDataUrl, 148, 46);
+      doc.setTextColor(25, 25, 28);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.text(`OFFICIAL ${r.receipt_type.toUpperCase()} RECEIPT`, 10, ruleY + 9);
+      doc.text(`#${r.receipt_number || r.id}`, 138, ruleY + 9, { align: "right" });
+      y = ruleY + 17;
+    } else {
+      doc.setFillColor(13, 148, 136);
+      doc.rect(0, 0, 148, 30, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(13);
+      doc.text(brand, 10, 13);
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
+      doc.text(`OFFICIAL ${r.receipt_type.toUpperCase()} RECEIPT`, 10, 21);
+      doc.text(`#${r.receipt_number || r.id}`, 115, 13);
+    }
 
     doc.setTextColor(39, 39, 42);
     doc.setFontSize(9);
-    let y = 42;
     const row = (label, val) => {
       doc.setFont("helvetica", "bold");
       doc.text(label, 10, y);
@@ -135,11 +149,19 @@ export default function ReceiptsView({ receipts = [], bookings = [], branding, f
     if (r.notes) row("Notes:", r.notes);
 
     y += 4;
-    doc.setFillColor(240, 253, 250);
+    if (isLetterhead) {
+      doc.setFillColor(253, 242, 242);
+    } else {
+      doc.setFillColor(240, 253, 250);
+    }
     doc.rect(10, y, 128, 16, "F");
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
-    doc.setTextColor(13, 148, 136);
+    if (isLetterhead) {
+      doc.setTextColor(...agency.accentRgb);
+    } else {
+      doc.setTextColor(13, 148, 136);
+    }
     doc.text("AMOUNT RECEIVED:", 14, y + 10);
     doc.text(`PKR ${Number(r.amount).toLocaleString()}`, 88, y + 10);
 
@@ -150,7 +172,11 @@ export default function ReceiptsView({ receipts = [], bookings = [], branding, f
     doc.text("Authorized Signature", 12, 180);
     doc.line(90, 175, 138, 175);
     doc.text("Customer Signature", 95, 180);
-    doc.text(`${brand} ${phone ? `| ${phone}` : ""}`, 10, 195);
+    if (isLetterhead) {
+      drawLetterheadFooterStrip(doc, agency, 148, 210);
+    } else {
+      doc.text(`${brand} ${phone ? `| ${phone}` : ""}`, 10, 195);
+    }
 
     doc.save(`Receipt_${r.receipt_number || r.id}.pdf`);
   };

@@ -17,6 +17,7 @@ import SimpleDashboardView from "./SimpleDashboardView";
 import SimplePartnersView from "./SimplePartnersView";
 import SimpleDriversView from "./SimpleDriversView";
 import ReceiptsView from "./ReceiptsView";
+import { getAgencyInfo, loadLogoDataUrl, drawLetterheadHeader, drawLetterheadFooterStrip } from "./pdfTemplates";
 import InvoicesLettersView from "./InvoicesLettersView";
 import SettingsView from "./SettingsView";
 import SuppliersView from "./SuppliersView";
@@ -3467,25 +3468,40 @@ function estimateBookingCharges(b) {
   return { days, rent, chauffeur, latePenalty, carWash, extraFuel, damages, total, rawDays };
 }
 
-function generateRentalContract(booking, brandingName = "Rent A Car Management System") {
+async function generateRentalContract(booking, branding = "Rent A Car Management System") {
   if (!booking) return;
   const charges = estimateBookingCharges(booking);
   const doc = new jsPDF();
-  const brand = brandingName || "Rent A Car Management System";
+  const brandingObj = typeof branding === "string" ? { name: branding } : (branding || {});
+  const brand = brandingObj.name || "Rent A Car Management System";
+  const agency = getAgencyInfo(brandingObj);
+  const isLetterhead = agency.letterhead;
 
-  doc.setFillColor(13, 148, 136);
-  doc.rect(0, 0, 210, 36, "F");
-  doc.setTextColor(255, 255, 255);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(18);
-  doc.text(brand.toUpperCase(), 15, 16);
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "normal");
-  doc.text("VEHICLE RENTAL AGREEMENT / LEASE CONTRACT", 15, 26);
-  doc.text(`Contract #RMS-${booking.id}`, 150, 26);
+  let y = 48;
+  if (isLetterhead) {
+    const logoDataUrl = await loadLogoDataUrl(agency.logo_url);
+    const ruleY = drawLetterheadHeader(doc, agency, logoDataUrl, 210);
+    doc.setTextColor(25, 25, 28);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    doc.text("VEHICLE RENTAL AGREEMENT / LEASE CONTRACT", 15, ruleY + 10);
+    doc.setFontSize(10);
+    doc.text(`Contract #RMS-${booking.id}`, 195, ruleY + 10, { align: "right" });
+    y = ruleY + 18;
+  } else {
+    doc.setFillColor(13, 148, 136);
+    doc.rect(0, 0, 210, 36, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.text(brand.toUpperCase(), 15, 16);
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.text("VEHICLE RENTAL AGREEMENT / LEASE CONTRACT", 15, 26);
+    doc.text(`Contract #RMS-${booking.id}`, 150, 26);
+  }
 
   doc.setTextColor(30, 30, 30);
-  let y = 48;
   const ensureSpace = (needed = 12) => {
     if (y + needed > 282) {
       doc.addPage();
@@ -3618,6 +3634,10 @@ function generateRentalContract(booking, brandingName = "Rent A Car Management S
   doc.setFontSize(8);
   doc.setTextColor(100, 100, 100);
   doc.text(`Generated ${new Date().toLocaleString()} — Status: ${booking.status}`, 15, y);
+
+  if (isLetterhead) {
+    drawLetterheadFooterStrip(doc, agency, 210, 297);
+  }
 
   doc.save(`Rental_Contract_PCS_${booking.id}.pdf`);
 }
@@ -4160,26 +4180,40 @@ function BookingsView({
     fetchData();
   };
 
-  const downloadPDFInvoice = () => {
+  const downloadPDFInvoice = async () => {
     if (!selectedBooking) return;
     const doc = new jsPDF();
-    
+
     // Theme Colors (Gold/Dark Gray)
     const primaryColor = [197, 155, 39]; // #c59b27
     const secondaryColor = [39, 39, 42]; // Zinc-800
-    
-    // Header Branding
-    doc.setFillColor(...primaryColor);
-    doc.rect(0, 0, 210, 40, "F");
-    
-    doc.setTextColor(255, 255, 255);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(22);
-    doc.text((branding.name || "Rent A Car Management System").toUpperCase(), 15, 25);
-    
-    doc.setFontSize(9);
-    doc.setFont("helvetica", "normal");
-    doc.text("LAHORE HUB | EXECUTIVE LEASE AUDIT STATEMENT", 15, 32);
+
+    const invAgency = getAgencyInfo(branding);
+    const invIsLetterhead = invAgency.letterhead;
+    if (invIsLetterhead) {
+      const logoDataUrl = await loadLogoDataUrl(invAgency.logo_url);
+      const ruleY = drawLetterheadHeader(doc, invAgency, logoDataUrl, 210);
+      doc.setTextColor(25, 25, 28);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(13);
+      doc.text(`INVOICE STATEMENT #RMS-${selectedBooking.id}`, 15, ruleY + 10);
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
+      doc.text("EXECUTIVE LEASE AUDIT STATEMENT", 195, ruleY + 10, { align: "right" });
+    } else {
+      // Header Branding
+      doc.setFillColor(...primaryColor);
+      doc.rect(0, 0, 210, 40, "F");
+
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(22);
+      doc.text((branding.name || "Rent A Car Management System").toUpperCase(), 15, 25);
+
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
+      doc.text("LAHORE HUB | EXECUTIVE LEASE AUDIT STATEMENT", 15, 32);
+    }
     
     // Bill To Customer Details
     doc.setTextColor(...secondaryColor);
@@ -4279,7 +4313,11 @@ function BookingsView({
     doc.setFont("helvetica", "italic");
     doc.setFontSize(8);
     doc.text("This is a computer generated invoice statement issued on behalf of Omnysync Lahore.", 15, 280);
-    
+
+    if (invIsLetterhead) {
+      drawLetterheadFooterStrip(doc, invAgency, 210, 297);
+    }
+
     doc.save(`Invoice_PCS_${selectedBooking.id}.pdf`);
   };
 
@@ -4492,7 +4530,7 @@ function BookingsView({
                     <Edit2 className="h-3.5 w-3.5" />
                   </button>
                   <button
-                    onClick={() => generateRentalContract(b, branding?.name)}
+                    onClick={() => generateRentalContract(b, branding)}
                     className="bg-[var(--bg-app)] hover:border-[var(--accent-color)] text-[var(--text-main)] px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-[var(--border-color)] min-h-[44px]"
                     title="Rental contract PDF"
                   >
@@ -4518,8 +4556,18 @@ function BookingsView({
                       variant="outline" 
                       onClick={() => {
                         setSelectedBooking(b);
-                        setTimeout(() => {
+                        setTimeout(async () => {
                           const doc = new jsPDF();
+                          const stmtAgency = getAgencyInfo(branding);
+                          const stmtIsLetterhead = stmtAgency.letterhead;
+                          if (stmtIsLetterhead) {
+                            const stmtLogo = await loadLogoDataUrl(stmtAgency.logo_url);
+                            const stmtRuleY = drawLetterheadHeader(doc, stmtAgency, stmtLogo, 210);
+                            doc.setTextColor(25, 25, 28);
+                            doc.setFont("helvetica", "bold");
+                            doc.setFontSize(12);
+                            doc.text(`INVOICE STATEMENT #RMS-${b.id} | COMPLETED AUDIT`, 15, stmtRuleY + 10);
+                          } else {
                           doc.setFillColor(197, 155, 39);
                           doc.rect(0, 0, 210, 40, "F");
                           doc.setTextColor(255, 255, 255);
@@ -4529,6 +4577,7 @@ function BookingsView({
                           doc.setFontSize(9);
                           doc.setFont("helvetica", "normal");
                           doc.text(`INVOICE STATEMENT #RMS-${b.id} | COMPLETED AUDIT`, 15, 30);
+                          }
                           doc.setTextColor(39, 39, 42);
                           doc.setFont("helvetica", "bold");
                           doc.text("CUSTOMER LEASE DETAILS", 15, 55);
@@ -4569,6 +4618,9 @@ function BookingsView({
                           doc.setFont("helvetica", "italic");
                           doc.setFontSize(8);
                           doc.text("This transaction has been successfully closed and paid in full.", 15, 280);
+                          if (stmtIsLetterhead) {
+                            drawLetterheadFooterStrip(doc, stmtAgency, 210, 297);
+                          }
                           doc.save(`Invoice_PCS_${b.id}.pdf`);
                         }, 100);
                       }}
@@ -4676,7 +4728,7 @@ function BookingsView({
               </button>
               <button
                 type="button"
-                onClick={() => generateRentalContract(b, branding?.name)}
+                onClick={() => generateRentalContract(b, branding)}
                 className="min-h-[44px] min-w-[44px] px-3 bg-[var(--bg-app)] border border-[var(--border-color)] rounded-lg"
                 title="Contract PDF"
               >
@@ -4977,7 +5029,7 @@ function BookingsView({
                 <Edit2 className="h-3.5 w-3.5" /> Edit Booking
               </button>
               <button
-                onClick={() => generateRentalContract(selectedBooking, branding?.name)}
+                onClick={() => generateRentalContract(selectedBooking, branding)}
                 className="flex-1 bg-[var(--bg-app)] border border-[var(--border-color)] hover:border-[var(--accent-color)] text-[var(--text-main)] font-semibold py-2 rounded-lg text-xs min-h-[44px] flex items-center justify-center gap-1"
               >
                 <FileText className="h-3.5 w-3.5" /> Contract PDF
